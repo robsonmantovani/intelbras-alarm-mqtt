@@ -68,31 +68,29 @@ jobs:
         with:
           script: |
             const packageName = 'intelbras-alarm-mqtt';
-            const query = `
-              query($login: String!) {
-                user(login: $login) {
-                  packages(first: 1, names: ["${packageName}"], packageType: CONTAINER) {
-                    nodes {
-                      id
-                    }
-                  }
-                }
-              }
-            `;
-            const result = await github.graphql(query, { login: context.repo.owner });
-            const pkg = result.user.packages.nodes[0];
-            if (pkg) {
-              await github.graphql(`
-                mutation($packageId: ID!) {
-                  updatePackageVisibility(input: { packageId: $packageId, visibility: PUBLIC }) {
-                    clientMutationId
-                  }
-                }
-              `, { packageId: pkg.id });
-              console.log('✅ Package set to public visibility');
-            } else {
-              console.log('⚠️ Package not found yet (may take a moment to register)');
+            const owner = context.repo.owner;
+            // Use REST API to list packages (GraphQL enum PackageType doesn't accept CONTAINER in some schemas)
+            const listResp = await github.rest.packages.listPackagesForUser({
+              username: owner,
+              package_type: 'container',
+            });
+            const pkg = listResp.data.find(p => p.name === packageName);
+            if (!pkg) {
+              console.log('⚠️ Package not found yet (may take a moment to register after first push)');
+              return;
             }
+            console.log(`Found package id=${pkg.id} visibility=${pkg.visibility}`);
+            if (pkg.visibility === 'public') {
+              console.log('✅ Package already public');
+              return;
+            }
+            await github.rest.packages.updatePackageForUser({
+              package_type: 'container',
+              package_name: packageName,
+              username: owner,
+              visibility: 'public',
+            });
+            console.log('✅ Package set to public visibility');
 
       - name: Run Trivy vulnerability scanner
         if: github.event_name != 'pull_request'
