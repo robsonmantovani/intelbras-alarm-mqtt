@@ -62,57 +62,6 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
 
-      - name: Set package visibility to public
-        if: github.event_name != 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const packageName = 'intelbras-alarm-mqtt';
-            const owner = context.repo.owner;
-            // Use raw REST API via @octokit/request to avoid schema quirks
-            const ownerType = context.repo.owner === (await github.rest.users.getAuthenticated()).data.login
-              ? 'user' : 'org';
-            const listPath = `/${ownerType}s/${owner}/packages?package_type=container&visibility=private`;
-            const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-            const listResp = await fetch(`https://api.github.com${listPath}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28',
-              },
-            });
-            if (!listResp.ok) {
-              console.log(`⚠️ List packages returned ${listResp.status}: ${await listResp.text()}`);
-              return;
-            }
-            const packages = await listResp.json();
-            const pkg = packages.find(p => p.name === packageName);
-            if (!pkg) {
-              console.log(`⚠️ Package ${packageName} not found in private packages (may be public already)`);
-              return;
-            }
-            console.log(`Found package id=${pkg.id} visibility=${pkg.visibility}`);
-            if (pkg.visibility === 'public') {
-              console.log('✅ Package already public');
-              return;
-            }
-            const updatePath = `/${ownerType}s/${owner}/packages/container/${packageName}`;
-            const updResp = await fetch(`https://api.github.com${updatePath}`, {
-              method: 'PATCH',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github+json',
-                'X-GitHub-Api-Version': '2022-11-28',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ visibility: 'public' }),
-            });
-            if (!updResp.ok) {
-              throw new Error(`Update failed: ${updResp.status} ${await updResp.text()}`);
-            }
-            const result = await updResp.json();
-            console.log(`✅ Package visibility: ${result.visibility}`);
-
       - name: Run Trivy vulnerability scanner
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@master
