@@ -12,18 +12,18 @@ A bridge that connects Intelbras alarm panels (AMT, ANM series) to Home Assistan
 
 These alarm panels don't accept direct TCP connections from outside. Instead, they communicate through the Intelbras Cloud:
 
-```
-┌─────────────┐       ┌──────────────────┐       ┌───────────┐
-│ Alarm Panel │<====>│ Amazon/Intelbras │----->│ MQTT      │
-│ (LAN only)  │       │ Cloud Relay       │       | HA       │
-└─────────────┘       └──────────────────┘       | local     │
-                                                  |           │
-                                        ───────►──│ Broker   │
-                                                [HA]     │
-                                                       ◄──────
-                                          ◄──────────| MQTT  │
-                                                      │      │  
-                                            ◄─────<────────┘
+```mermaid
+flowchart LR
+    A[Alarm Panel<br/>ANM 24 NET] -->|Encrypted TCP| B[Intelbras Cloud<br/>amt.intelbras.com.br:9015]
+    B -->|Encrypted TCP| C[Bridge<br/>intelbras-alarm-mqtt]
+    C -->|MQTT| D[Mosquitto<br/>Broker]
+    D -->|MQTT discovery| E[Home Assistant]
+    E -->|Dashboard| F[User]
+    F -->|Arm/Disarm| E
+    E -->|MQTT| D
+    D -->|MQTT| C
+    C -->|Cloud command| B
+    B -->|Relay| A
 ```
 
 The bridge connects to `amt.intelbras.com.br:9015` (protocol V1) and publishes alarm status to your Home Assistant instance.
