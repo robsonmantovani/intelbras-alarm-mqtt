@@ -1,0 +1,46 @@
+# Intelbras Alarm MQTT Bridge Configuration
+# Copy to config.yml and adjust values for your installation
+# ⚠️  Never commit your real config.yml with sensitive data!
+
+alarm:
+  mac: "REPLACE_WITH_YOUR_PANEL_MAC"        # MAC address of alarm panel (no colons)
+  password: "REPLACE_WITH_YOUR_PASSWORD"    # Alarm panel password
+  server: "amt.intelbras.com.br"             # Intelbras Cloud Relay server (V1)
+  port: 9015                                # V1 Cloud Relay port
+  total_zones: 24                           # ANM 24 NET has 24 zones
+  poll_interval: 5                          # seconds between status polls
+  command_timeout: 10                       # seconds for cloud relay timeout
+
+mqtt:
+  host: "localhost"                         # Your MQTT broker IP/hostname
+  port: 1883
+  username: ""                              # Leave empty if no auth
+  password: ""
+  client_id: "intelbras-alarm-bridge"
+  discovery_prefix: "homeassistant"         # HA MQTT discovery prefix
+  topic_prefix: "intelbras_alarm"           # Base topic for all messages
+
+# Zone configuration — only zones listed here appear in Home Assistant
+# device_class options: door, window, motion, smoke, gas, safety, moisture, vibration, occupancy, opening, garage_door
+zones:
+  6:
+    name: "Replace with your zone name"
+    device_class: "door"
+  7:
+    name: "Replace with your zone name"
+    device_class: "door"
+  8:
+    name: "Replace with your zone name"
+    device_class: "door"
+  9:
+    name: "Replace with your zone name"
+    device_class: "motion"
+  10:
+    name: "Replace with your zone name"
+    device_class: "motion"
+  11:
+    name: "Replace with your zone name"
+    device_class: "motion"
+  12:
+    name: "Replace with your zone name"
+    device_class: "motion"
