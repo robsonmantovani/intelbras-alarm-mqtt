@@ -1,5 +1,9 @@
 # Intelbras Cloud Relay Bridge for MQTT to Home Assistant
 
+[![Build and Push Docker Image](https://github.com/robsonmantovani/intelbras-alarm-mqtt/actions/workflows/docker-build.yml/badge.svg)](https://github.com/robsonmantovani/intelbras-alarm-mqtt/actions/workflows/docker-build.yml)
+[![Docker Image](https://ghcr.io/robsonmantovani/intelbras-alarm-mqtt/badge)](https://ghcr.io/robsonmantovani/intelbras-alarm-mqtt)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A bridge that connects Intelbras alarm panels (AMT, ANM series) to Home Assistant via MQTT using the Intelbras Cloud Relay.
 
 ## Hardware Compatibility
