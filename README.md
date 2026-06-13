@@ -1,5 +1,4 @@
 # Intelbras Cloud Relay Bridge for MQTT to Home Assistant
-# https://github.com/mantovani/intelbras-cloud-relay-bridge
 
 A bridge that connects Intelbras alarm panels (AMT, ANM series) to Home Assistant via MQTT using the Intelbras Cloud Relay.
 
