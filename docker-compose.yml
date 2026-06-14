@@ -6,6 +6,8 @@ services:
     environment:
       - CONFIG_PATH=/config/config.yml
       - TZ=America/Sao_Paulo
+      # Log verbosity: DEBUG, INFO (default), WARNING, ERROR
+      - LOG_LEVEL=INFO
     volumes:
       - ./config.yml:/config/config.yml:ro
     # Network mode: use 'host' if MQTT broker is on the same host,

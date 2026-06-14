@@ -83,24 +83,89 @@ nano config.yml
 python app.py
 ```
 
-## Setup Examples
+## Configuration
 
-### Docker run example with config volume mounted:
+All configuration is in `config.yml` (see `config.example.yml`):
 
-```bash
-docker run -d \
-  --name intelbras-bridge \
-  --network host \
-  -v /home/intelbras:/etc/intelbras \
-  mantovani/intelbras-cloud-relay-bridge \
-  --config ./config/config.yml
+```yaml
+alarm:
+  mac: "REPLACE_WITH_YOUR_PANEL_MAC"
+  password: "REPLACE_WITH_YOUR_PASSWORD"
+  server: "amt.intelbras.com.br"
+  port: 9015
+  total_zones: 24
+  poll_interval: 5
+  command_timeout: 10
+mqtt:
+  host: "localhost"
+  port: 1883
+  username: ""
+  password: ""
+  client_id: "intelbras-alarm-bridge"
+  discovery_prefix: "homeassistant"
+  topic_prefix: "intelbras_alarm"
+zones:
+  6:
+    name: "Porta da Sala"
+    device_class: "door"
+  # ... only zones you want exposed to Home Assistant
 ```
 
-### Manual installation with config:
+### Log verbosity
 
-1. Copy `config.example.yml` to your working directory as `config.yml`
-2. Edit your alarm panel configuration (MAC, password, zones)
-3. Run `python app_alarm.py`
+Set the `LOG_LEVEL` environment variable to one of:
+
+- `DEBUG` — verbose: every poll, every MQTT message, every status publish
+- `INFO` (default) — startup info, connection state, status changes
+- `WARNING` — only problems
+- `ERROR` — only fatal errors
+
+**Docker Compose:**
+
+```yaml
+environment:
+  - LOG_LEVEL=DEBUG
+```
+
+**Plain Docker:**
+
+```bash
+docker run -e LOG_LEVEL=DEBUG ...
+```
+
+**Python:**
+
+```bash
+LOG_LEVEL=DEBUG python3 app.py
+```
+
+**Sample DEBUG output:**
+
+```
+2026-06-13 23:45:01 [INFO   ] int-alarm: Intelbras Alarm MQTT Bridge
+2026-06-13 23:45:01 [INFO   ] int-alarm.cloud: Connecting to Intelbras cloud relay...
+2026-06-13 23:45:02 [INFO   ] int-alarm.cloud: ✅ Cloud relay connected
+2026-06-13 23:45:02 [INFO   ] int-alarm.mqtt: ✅ MQTT connected to localhost:1883
+2026-06-13 23:45:02 [INFO   ] int-alarm.mqtt: Subscribed to intelbras_alarm/command/#
+2026-06-13 23:45:07 [DEBUG  ] int-alarm.cloud: Polling alarm status (zones=24)...
+2026-06-13 23:45:08 [INFO   ] int-alarm.mqtt: 📤 Published status to intelbras_alarm/status (arm=disarmed, zones_open=[], siren=False) [412 bytes, mid=42]
+2026-06-13 23:45:13 [INFO   ] int-alarm.mqtt: 📩 MQTT message: topic=intelbras_alarm/command/arm payload='arm'
+2026-06-13 23:45:13 [INFO   ] int-alarm.cloud: Sending ARM command to alarm...
+2026-06-13 23:45:14 [INFO   ] int-alarm.cloud: Arm result: OK
+```
+
+### Viewing live logs
+
+```bash
+# Docker Compose
+docker compose logs -f intelbras-alarm-bridge
+
+# Plain Docker
+docker logs -f intelbras-alarm-bridge
+
+# Last 100 lines
+docker compose logs --tail=100 intelbras-alarm-bridge
+```
 
 ## Home Assistant Integration
 
@@ -115,14 +180,14 @@ All entities are auto-discovered by Home Assistant via MQTT discovery payloads.
 ### Control Topics:
 
 ```bash
-# Arm the alarm (AWAY mode)
-mosquitto_pub -t "intelbras_alarm/alarm/set_state" -m arm
+# Arm the alarm
+mosquitto_pub -t "intelbras_alarm/command/arm" -m ""
 
 # Disarm
-mosquitto_pub -t "intelbras_alarm/alarm/set_state" -m disarm
+mosquitto_pub -t "intelbras_alarm/command/disarm" -m ""
 
-# Trigger siren
-mosquitto_pub -t "intelbras_alarm/siren/control" -m ON
+# Siren off (read-only sensor otherwise - see Known Limitations)
+mosquitto_pub -t "intelbras_alarm/siren/control" -m "OFF"
 ```
 
 ## Architecture
