@@ -162,9 +162,12 @@ print(f"Armed: {status.armed}")
 
 ## Known Limitations
 
-- Only supports protocol V1 (panels without firmware updates to V2)
-- Does not support panels that require authentication via username/password pairs
-- Siren activation requires manual intervention if your alarm has specific sirene control commands
+- **Protocol V1 only**: This bridge speaks the V1 Cloud Relay protocol. Panels that have been firmware-updated to V2 (e.g. `amt-mobile-v4.intelbras.com.br`) are not supported.
+- **Siren trigger from HA**: There is no known V1 command to *activate* the siren on demand. You can **stop** a sounding siren (command `0x4F`), but to *trigger* it you need to:
+  - Arm the alarm and let a zone trigger it (bypass all other zones, leave one open)
+  - Or use a physical panic button / the AMT Mobile app
+  - The Home Assistant entity exposes the siren as a read-only `binary_sensor` (state of the siren) rather than a controllable `switch`
+- **No user/password auth**: V1 Cloud Relay uses MAC + password only. Panels that require a separate user account are not supported.
 
 ---
 
