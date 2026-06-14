@@ -8,9 +8,16 @@ A bridge that connects Intelbras alarm panels (AMT, ANM series) to Home Assistan
 
 ## Hardware Compatibility
 
+### Tested ✅
+
+- **ANM 24 NET** (firmware 6.6) — confirmed working with 24 zones, arm/disarm, status polling
+
+### Should work (untested, same protocol family)
+
 - AMT 2018 / AMT 2018 E Smart
-- ANM 24 NET
-- Other panels with cloud connectivity
+- Other Intelbras panels that use the same V1 Cloud Relay protocol (`amt.intelbras.com.br:9015`)
+
+PRs welcome if you test on other panels!
 
 ## How it Works
 
