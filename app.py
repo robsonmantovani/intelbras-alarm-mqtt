@@ -54,7 +54,12 @@ def load_config(path: str) -> dict:
             user_config = yaml.safe_load(f) or {}
         config["alarm"].update(user_config.get("alarm", {}))
         config["mqtt"].update(user_config.get("mqtt", {}))
-        config["zones"].update(user_config.get("zones", {}))
+
+        # Normalize zone keys to strings (YAML parses "6:" as int, but we
+        # need string keys for the rest of the code to work)
+        user_zones = user_config.get("zones", {}) or {}
+        normalized_zones = {str(k): v for k, v in user_zones.items()}
+        config["zones"].update(normalized_zones)
     else:
         logger.warning(f"Config not found at {path}, using defaults")
     return config
@@ -134,10 +139,18 @@ def publish_discovery(client: mqtt.Client, config: dict):
     if zones_cfg:
         # Only publish zones listed in config
         zone_list = sorted(int(k) for k in zones_cfg.keys())
+        mqtt_logger.info(
+            f"Publishing {len(zone_list)} zones from config: {zone_list}"
+        )
+        for zn in zone_list:
+            zname = zones_cfg.get(str(zn), {}).get("name", f"Zona {zn}")
+            mqtt_logger.info(f"  Zone {zn}: '{zname}'")
     else:
         # No zone config — publish all zones with default names
         zone_list = list(range(1, alarm_cfg.get("total_zones", 24) + 1))
-    mqtt_logger.info(f"Publishing {len(zone_list)} zones to HA discovery")
+        mqtt_logger.info(
+            f"No zone names configured, publishing all {len(zone_list)} zones with default names"
+        )
 
     for zone_num in zone_list:
         zone_key = str(zone_num)
