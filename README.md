@@ -5,7 +5,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Nota**: A imagem Docker é publicada como **privada** por padrão (política do GitHub).
-> Para usar publicamente, torne o package público: https://github.com/robsonmantovani/intelbras-alarm-mqtt/pkgs/container/intelbras-alarm-mqtt/settings (botão "Change visibility" → Public).
+> Para usar, primeiro torne o package público: https://github.com/robsonmantovani/intelbras-alarm-mqtt/pkgs/container/intelbras-alarm-mqtt/settings (botão "Change visibility" → Public).
+>
+> Se preferir manter privado, faça login antes do pull:
+> ```bash
+> echo $GITHUB_TOKEN | docker login ghcr.io -u robsonmantovani --password-stdin
+> ```
 
 
 A bridge that connects Intelbras alarm panels (AMT, ANM series) to Home Assistant via MQTT using the Intelbras Cloud Relay.
@@ -38,25 +43,47 @@ The bridge connects to `amt.intelbras.com.br:9015` (protocol V1) and publishes a
 
 ## Installation Instructions
 
-### Method 1: Docker (Recommended)
+### Method 1: Docker Compose (Recommended)
 
 ```bash
-# Download the image from GitHub
-docker pull <your-repo>/intelbras-cloud-relay-bridge
+# 1. Copy and edit your config
+cp config.example.yml config.yml
+nano config.yml   # fill in MAC, password, MQTT details, zone names
 
-# Run your bridge - see below for configuration example
-docker run -d          \
-    --name intelbras-alarm \
-    --network host     \
-    -e CONFIG_PATH /etc/intelbras/config.yml \
-    mantovani/intelbras-cloud-relay-bridge:latest
+# 2. Pull and start
+docker compose pull
+docker compose up -d
+
+# 3. Check logs
+docker compose logs -f
 ```
 
-### Method 2: Python (Manual install)
+The image is published to GitHub Container Registry:
+`ghcr.io/robsonmantovani/intelbras-alarm-mqtt:latest`
 
-1. Configure your alarm panel MAC address and password in config.yml
-2. Run `pip install -r requirements.txt`
-3. Execute `python app_alarm.py`
+### Method 2: Docker (manual)
+
+```bash
+docker pull ghcr.io/robsonmantovani/intelbras-alarm-mqtt:latest
+
+docker run -d \
+  --name intelbras-alarm-bridge \
+  --network host \
+  -e CONFIG_PATH=/config/config.yml \
+  -e TZ=America/Sao_Paulo \
+  -v $(pwd)/config.yml:/config/config.yml:ro \
+  --restart unless-stopped \
+  ghcr.io/robsonmantovani/intelbras-alarm-mqtt:latest
+```
+
+### Method 3: Python (manual install)
+
+```bash
+pip install -r requirements.txt
+cp config.example.yml config.yml
+nano config.yml
+python app.py
+```
 
 ## Setup Examples
 

@@ -1,8 +1,6 @@
-version: "3.8"
-
 services:
   intelbras-alarm-bridge:
-    build: .
+    image: ghcr.io/robsonmantovani/intelbras-alarm-mqtt:latest
     container_name: intelbras-alarm-bridge
     restart: unless-stopped
     environment:
