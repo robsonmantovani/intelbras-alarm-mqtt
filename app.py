@@ -95,6 +95,8 @@ class AlarmBridge:
         self._mqtt_connected = False
         self._cloud_connected = False
         self._last_status: Optional[dict] = None
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 5
 
         # MQTT callbacks
         self.client.on_connect = self._on_mqtt_connect
@@ -272,10 +274,32 @@ class AlarmBridge:
             total_zones = self.alarm_cfg.get("total_zones", 24)
             cloud_logger.debug(f"Polling alarm status (zones={total_zones})...")
             status = self._alarm.get_status(total_zones)
-            if not status.connected:
-                cloud_logger.warning("Status poll returned disconnected state")
-                self._cloud_connected = False
+
+            # Check for NAK or short response (alarm refused the command)
+            raw = status.raw_response or []
+            if not status.connected or len(raw) < 20:
+                self._consecutive_failures += 1
+                cloud_logger.warning(
+                    f"Status poll failed (consecutive: {self._consecutive_failures}/{self._max_consecutive_failures}). "
+                    f"Raw response ({len(raw)} bytes): {bytes(raw).hex() if raw else '(empty)'}"
+                )
+                # Mark alarm as unavailable in MQTT
+                self._mqtt_publish_availability("offline")
+                # Reconnect cloud relay after too many failures
+                if self._consecutive_failures >= self._max_consecutive_failures:
+                    cloud_logger.warning(
+                        "Too many consecutive failures, reconnecting to cloud relay..."
+                    )
+                    self.disconnect_cloud()
+                    self._consecutive_failures = 0
                 return
+
+            # Success — reset failure counter
+            if self._consecutive_failures:
+                cloud_logger.info(
+                    f"Status poll recovered after {self._consecutive_failures} failure(s)"
+                )
+                self._consecutive_failures = 0
 
             status_dict = self._status_to_dict(status)
             cloud_logger.debug(
@@ -284,9 +308,11 @@ class AlarmBridge:
                 f"siren={status.siren_triggered} battery_low={status.battery_low}"
             )
             self._mqtt_publish_status(status_dict)
+            self._mqtt_publish_availability("online")
             self._last_status = status_dict
         except Exception as e:
             cloud_logger.error(f"Poll failed: {e}", exc_info=logger.isEnabledFor(logging.DEBUG))
+            self._consecutive_failures += 1
 
     def connect_mqtt(self):
         host = self.mqtt_cfg["host"]

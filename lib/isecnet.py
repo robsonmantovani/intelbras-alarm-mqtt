@@ -145,12 +145,22 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
     """Parse ISECNet V1 partial status response (0x5A, 46 bytes)."""
     status = AlarmStatus()
     status.raw_response = data
-    status.connected = True
-    status.total_zones = total_zones
+
+    # Log the raw response at DEBUG level for diagnostics
+    if data:
+        logger.debug(f"Raw status response: {bytes(data).hex()}")
 
     if len(data) < 20:
-        logger.warning(f"Status data too short: {len(data)} bytes")
+        logger.warning(
+            f"Status data too short: {len(data)} bytes (expected 46). "
+            f"Raw: {bytes(data).hex() if data else '(empty)'}"
+        )
+        # Mark as disconnected so caller doesn't publish fake "all OK" status
+        status.connected = False
         return status
+
+    status.connected = True
+    status.total_zones = total_zones
 
     # Model code at data[19]
     try:
