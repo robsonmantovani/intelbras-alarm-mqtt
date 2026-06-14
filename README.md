@@ -4,15 +4,6 @@
 [![Docker Image](https://ghcr.io/robsonmantovani/intelbras-alarm-mqtt/badge)](https://ghcr.io/robsonmantovani/intelbras-alarm-mqtt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Nota**: A imagem Docker é publicada como **privada** por padrão (política do GitHub).
-> Para usar, primeiro torne o package público: https://github.com/robsonmantovani/intelbras-alarm-mqtt/pkgs/container/intelbras-alarm-mqtt/settings (botão "Change visibility" → Public).
->
-> Se preferir manter privado, faça login antes do pull:
-> ```bash
-> echo $GITHUB_TOKEN | docker login ghcr.io -u robsonmantovani --password-stdin
-> ```
-
-
 A bridge that connects Intelbras alarm panels (AMT, ANM series) to Home Assistant via MQTT using the Intelbras Cloud Relay.
 
 ## Hardware Compatibility
