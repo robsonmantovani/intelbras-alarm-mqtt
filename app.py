@@ -60,7 +60,17 @@ def load_config(path: str) -> dict:
     return config
 
 
+def _has_real_credentials(config: dict) -> bool:
+    """Check if MAC/password were actually filled in (not the placeholder)."""
+    mac = config["alarm"].get("mac", "")
+    pwd = config["alarm"].get("password", "")
+    if mac.startswith("REPLACE") or pwd.startswith("REPLACE") or not mac or not pwd:
+        return False
+    return True
+
+
 def _zone_device_class(n: int) -> str:
+    """Default device class for a zone number."""
     if n <= 8:
         return "door"
     elif n <= 16:
@@ -69,13 +79,165 @@ def _zone_device_class(n: int) -> str:
         return "safety"
 
 
-def _has_real_credentials(config: dict) -> bool:
-    """Check if MAC/password were actually filled in (not the placeholder)."""
-    mac = config["alarm"].get("mac", "")
-    pwd = config["alarm"].get("password", "")
-    if mac.startswith("REPLACE") or pwd.startswith("REPLACE") or not mac or not pwd:
-        return False
-    return True
+def _discovery_topic(prefix: str, component: str, object_id: str) -> str:
+    """Build HA MQTT discovery topic."""
+    return f"{prefix}/{component}/{object_id}/config"
+
+
+def publish_discovery(client: mqtt.Client, config: dict):
+    """Publish Home Assistant MQTT discovery payloads for all entities."""
+    mqtt_cfg = config["mqtt"]
+    alarm_cfg = config["alarm"]
+    zones_cfg = config.get("zones", {}) or {}
+    prefix = mqtt_cfg["discovery_prefix"]
+    topic_base = mqtt_cfg["topic_prefix"]
+    device_name = "Central de Alarme Intelbras"
+    device_id = "intelbras_alarm_central"
+
+    device = {
+        "identifiers": [device_id],
+        "name": device_name,
+        "manufacturer": "Intelbras",
+        "model": alarm_cfg.get("panel_model", "ANM 24 NET"),
+        "sw_version": "1.0.0",
+    }
+
+    # --- Alarm Control Panel ---
+    alarm_payload = {
+        "name": "Alarme Intelbras",
+        "unique_id": f"{device_id}_panel",
+        "device": device,
+        "state_topic": f"{topic_base}/status",
+        "value_template": "{{ value_json.arm_mode }}",
+        "command_topic": f"{topic_base}/command",
+        "availability_topic": f"{topic_base}/availability",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "code_arm_required": "false",
+    }
+    # Optional: support separate arm/disarm topics
+    alarm_payload["command_topic"] = f"{topic_base}/command/arm"
+    alarm_payload["payload_arm"] = "ON"
+    alarm_payload["payload_disarm"] = "OFF"
+    # Subscribe to a single combined topic doesn't work in HA, so use separate command topics:
+    # arm via /command/arm, disarm via /command/disarm (HA generates these for alarm_control_panel)
+    # For simplicity, we use one topic and accept the standard payloads
+    alarm_payload["command_topic"] = f"{topic_base}/command"
+    alarm_payload["payload_arm"] = "ARM"
+    alarm_payload["payload_disarm"] = "DISARM"
+
+    client.publish(
+        _discovery_topic(prefix, "alarm_control_panel", f"{device_id}_panel"),
+        json.dumps(alarm_payload), retain=True,
+    )
+    mqtt_logger.info(f"Published HA discovery: alarm_control_panel")
+
+    # --- Zone binary_sensors ---
+    if zones_cfg:
+        # Only publish zones listed in config
+        zone_list = sorted(int(k) for k in zones_cfg.keys())
+    else:
+        # No zone config — publish all zones with default names
+        zone_list = list(range(1, alarm_cfg.get("total_zones", 24) + 1))
+    mqtt_logger.info(f"Publishing {len(zone_list)} zones to HA discovery")
+
+    for zone_num in zone_list:
+        zone_key = str(zone_num)
+        zone_info = zones_cfg.get(zone_key, {}) if zones_cfg else {}
+        zone_name = zone_info.get("name", f"Zona {zone_num}")
+        zone_class = zone_info.get("device_class", _zone_device_class(zone_num))
+
+        zone_id = f"{device_id}_zone_{zone_num}"
+        zone_payload = {
+            "name": zone_name,
+            "unique_id": zone_id,
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": (
+                f"{{{{ 'ON' if {zone_num} in (value_json.zones_open or []) "
+                f"or {zone_num} in (value_json.zones_violated or []) else 'OFF' }}}}"
+            ),
+            "device_class": zone_class,
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        }
+        client.publish(
+            _discovery_topic(prefix, "binary_sensor", zone_id),
+            json.dumps(zone_payload), retain=True,
+        )
+    mqtt_logger.info(f"Published HA discovery: {len(zone_list)} zone binary_sensors")
+
+    # --- Siren ---
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_siren"),
+        json.dumps({
+            "name": "Sirene",
+            "unique_id": f"{device_id}_siren",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'ON' if value_json.siren_triggered else 'OFF' }}",
+            "device_class": "sound",
+            "payload_on": "ON", "payload_off": "OFF",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    # --- AC Power ---
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_ac_power"),
+        json.dumps({
+            "name": "Rede Elétrica",
+            "unique_id": f"{device_id}_ac_power",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'OFF' if value_json.ac_power_loss else 'ON' }}",
+            "device_class": "power",
+            "payload_on": "ON", "payload_off": "OFF",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    # --- Battery ---
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_battery"),
+        json.dumps({
+            "name": "Bateria Baixa",
+            "unique_id": f"{device_id}_battery",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'ON' if value_json.battery_low else 'OFF' }}",
+            "device_class": "battery",
+            "payload_on": "ON", "payload_off": "OFF",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    # --- Tamper ---
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_tamper"),
+        json.dumps({
+            "name": "Violação (Tamper)",
+            "unique_id": f"{device_id}_tamper",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'ON' if value_json.tamper else 'OFF' }}",
+            "device_class": "tamper",
+            "payload_on": "ON", "payload_off": "OFF",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    mqtt_logger.info(
+        "Published HA discovery: alarm_control_panel, "
+        f"{len(zone_list)} zones, siren, AC power, battery, tamper"
+    )
 
 
 class AlarmBridge:
@@ -185,6 +347,11 @@ class AlarmBridge:
             mqtt_logger.info(f"Subscribed to {siren_topic}")
             # Mark online
             self._mqtt_publish_availability("online")
+            # Publish HA discovery payloads so HA auto-creates entities
+            try:
+                publish_discovery(client, self.config)
+            except Exception as e:
+                mqtt_logger.error(f"HA discovery publish failed: {e}", exc_info=logger.isEnabledFor(logging.DEBUG))
         else:
             self._mqtt_connected = False
             mqtt_logger.error(f"❌ MQTT connection failed (rc={rc})")
