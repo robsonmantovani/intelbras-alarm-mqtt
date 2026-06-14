@@ -44,3 +44,10 @@ zones:
   12:
     name: "Replace with your zone name"
     device_class: "motion"
+
+# Zones that are ALWAYS bypassed when arming (e.g., a panic button that's
+# normally "open" but should not prevent the alarm from arming).
+# These zones will be bypassed automatically before ARM_AWAY/ARM_HOME,
+# and unbypassed after DISARM.
+# Set to an empty list [] to disable.
+always_bypass_zones: [1]

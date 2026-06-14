@@ -259,6 +259,9 @@ class AlarmBridge:
         self.alarm_cfg = config["alarm"]
         self.mqtt_cfg = config["mqtt"]
         self.zones_cfg = config.get("zones", {}) or {}
+        # Zones that should be bypassed before arming (e.g., a panic button
+        # that's always "open" but shouldn't prevent the alarm from arming)
+        self.always_bypass_zones = config.get("always_bypass_zones", []) or []
         self._alarm: Optional[CloudRelayClient] = None
         self.client = mqtt.Client(
             client_id=self.mqtt_cfg["client_id"],
@@ -322,6 +325,9 @@ class AlarmBridge:
         if not self._alarm:
             cloud_logger.error("Cannot arm: not connected to alarm")
             return False
+        # Bypass zones that should be ignored (e.g., panic button always open)
+        if self.always_bypass_zones:
+            self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
         cloud_logger.info("Sending ARM AWAY (full) command to alarm...")
         result = self._alarm.arm()
         # Verify with actual status (panel may queue command but not execute)
@@ -333,6 +339,8 @@ class AlarmBridge:
         if not self._alarm:
             cloud_logger.error("Cannot arm: not connected to alarm")
             return False
+        if self.always_bypass_zones:
+            self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
         cloud_logger.info("Sending ARM STAY (partial) command to alarm...")
         result = self._alarm.arm_stay()
         result = self._verify_arm_state(result, expected_armed=True)
@@ -355,6 +363,9 @@ class AlarmBridge:
         cloud_logger.info("Sending DISARM command to alarm...")
         result = self._alarm.disarm()
         result = self._verify_arm_state(result, expected_armed=False)
+        # Remove the bypass we set when arming, so zones return to normal
+        if result and self.always_bypass_zones:
+            self._alarm.bypass_zones(self.always_bypass_zones, bypass=False)
         cloud_logger.info(f"Disarm result: {'OK' if result else 'FAILED'}")
         return result
 

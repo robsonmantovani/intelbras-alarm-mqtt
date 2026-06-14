@@ -44,6 +44,7 @@ CMD_ACTIVATE_PART_B = [0x41, 0x42]  # 'A' + 'B' - arm partition B
 CMD_DEACTIVATE = [0x44]         # 'D' - disarm
 CMD_SIREN_OFF = [0x4F]          # 'O' - turn off siren
 CMD_PANIC = [0x45]              # 'E' - panic alarm (triggers siren)
+CMD_BYPASS = 0x42               # 'B' - bypass zones (followed by bitmask)
 
 # Model names
 MODEL_NAMES = {
@@ -410,6 +411,40 @@ class CloudRelayClient:
         if data is None:
             return False
         return self._parse_action_response(data, "Panic")
+
+    def bypass_zones(self, zone_indices: list[int], bypass: bool = True, total_zones: int = 24) -> bool:
+        """Bypass (or unbypass) zones using V1 bypass command.
+
+        Args:
+            zone_indices: List of 1-based zone numbers to bypass (e.g., [1, 6])
+            bypass: True to bypass, False to unbypass
+            total_zones: Total number of zones (default 24 for ANM 24 NET)
+
+        Returns:
+            True if the bypass command was accepted.
+        """
+        # Build bitmask - bit n = zone (n+1), so zone 1 = bit 0
+        n_bytes = (total_zones + 7) // 8
+        bitmask = [0x00] * n_bytes
+        for zone in zone_indices:
+            zero_based = zone - 1
+            if 0 <= zero_based < total_zones:
+                byte_idx = zero_based // 8
+                bit_idx = zero_based % 8
+                if bypass:
+                    bitmask[byte_idx] |= (1 << bit_idx)
+                # Note: for unbypass, we don't need to do anything because
+                # the bitmask is "full state" — zones not in zone_indices
+                # are unbypassed. But we want to PRESERVE existing bypasses
+                # of other zones, which we don't know here.
+                # For the "always bypass" use case, only this command is sent.
+
+        command = [CMD_BYPASS] + bitmask
+        data = self._send_v1_command(command, recv_timeout=5.0)
+        if data is None:
+            return False
+        action = f"Bypass zones {zone_indices} ({'on' if bypass else 'off'})"
+        return self._parse_action_response(data, action)
 
     def disarm(self) -> bool:
         """Disarm the alarm."""
