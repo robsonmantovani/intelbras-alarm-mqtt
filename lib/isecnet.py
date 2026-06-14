@@ -119,25 +119,47 @@ def _parse_date(data: list[int]) -> str:
 
 
 def _parse_zone_status(data: list[int], total_zones: int = 24) -> tuple[list[int], list[int], list[int]]:
-    """Parse zone status from V1 partial status response.
-    Zone data starts at data[33] (APK bytes[34]).
-    Each zone uses 2 bits: 00=closed, 01=open, 10=violated, 11=bypassed.
+    """Parse zone status from V1 status response.
+
+    Layout (from APK reverse-engineering):
+    - data[0] = ISEC_PROGRAM (0xE9) echo
+    - data[1..1+N] = zone open bitmap (1 bit per zone, LSB = zone 0)
+    - data[1+N..1+2N] = zone alarm bitmap (1 bit per zone)
+    - where N = ceil(total_zones / 8) bytes
+    - For ANM 24 NET: N = 3 bytes = 24 zones
+    - For AMT 2018: N = 6 bytes = 48 zones
+    - For AMT 4010: N = 8 bytes = 64 zones
     """
     zones_open, zones_violated, zones_bypassed = [], [], []
-    zone_start = 33
+    n_bytes = (total_zones + 7) // 8
+
+    # Need at least n_bytes * 2 + 1 bytes for open+alarm bitmaps after the echo
+    if len(data) < 1 + n_bytes * 2:
+        return zones_open, zones_violated, zones_bypassed
+
+    zone_byte_start = 1  # After ISEC_PROGRAM echo at data[0]
+
     for zone_idx in range(total_zones):
-        byte_idx = zone_start + (zone_idx // 4)
-        bit_offset = (zone_idx % 4) * 2
+        byte_idx = zone_byte_start + (zone_idx // 8)
+        bit_idx = zone_idx % 8
         if byte_idx >= len(data):
             break
-        state = (data[byte_idx] >> (6 - bit_offset)) & 0x03
+
+        # Open bitmap: bit set = zone is open
+        is_open = bool(data[byte_idx] & (1 << bit_idx))
+        # Alarm bitmap: bit set = zone is in alarm/violated
+        alarm_byte_idx = zone_byte_start + n_bytes + (zone_idx // 8)
+        is_alarmed = False
+        if alarm_byte_idx < len(data):
+            is_alarmed = bool(data[alarm_byte_idx] & (1 << bit_idx))
+
         zn = zone_idx + 1
-        if state == 0b01:
-            zones_open.append(zn)
-        elif state == 0b10:
+        if is_alarmed:
             zones_violated.append(zn)
-        elif state == 0b11:
-            zones_bypassed.append(zn)
+        elif is_open:
+            zones_open.append(zn)
+        # Note: bypass state is not in the V1 status response
+
     return zones_open, zones_violated, zones_bypassed
 
 
@@ -321,7 +343,13 @@ class CloudRelayClient:
         return data
 
     def _send_v1_command(self, command: list[int], recv_timeout: float = 5.0) -> Optional[list[int]]:
-        """Send ISECNet V1 command and return response data (stripped of frame)."""
+        """Send ISECNet V1 command and return response payload.
+
+        Response framing: the response MAY have a 1-byte size prefix
+        (value 0x01-0x7F), or it may be the raw payload directly. We detect
+        and strip the size prefix if present, leaving the parser to index
+        the model code at data[19] etc.
+        """
         if not self._connected or not self._sock:
             logger.error("Not connected")
             return None
@@ -338,12 +366,14 @@ class CloudRelayClient:
 
             logger.debug(f"V1 response ({len(raw)}): {raw.hex()}")
 
-            # Strip frame: [size][data...][checksum]
-            size = raw[0]
-            if len(raw) >= size + 1:
-                return list(raw[1:size + 1])
-            else:
+            # Strip the size prefix if present. A size byte is a small value
+            # (typically 0x20-0x40 for 46-byte responses) that wouldn't
+            # otherwise appear as the first byte of a status payload
+            # (which always starts with 0xE9 for ISEC responses).
+            if len(raw) > 1 and raw[0] != 0xE9 and raw[0] < 0x80:
+                logger.debug(f"Stripping size prefix byte 0x{raw[0]:02X}")
                 return list(raw[1:])
+            return list(raw)
         except OSError as e:
             logger.error(f"Socket error: {e}")
             self._connected = False
