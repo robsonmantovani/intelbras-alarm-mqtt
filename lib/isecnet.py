@@ -37,9 +37,13 @@ CMD_EXTENDED_STATUS = [0x5B]  # AMT 4010 Smart (~96 bytes)
 CMD_SMART_STATUS = [0x5D]     # AMT 2018 E Smart (135+ bytes)
 
 # V1 Action commands
-CMD_ACTIVATE = [0x41]    # 'A' - arm total
-CMD_DEACTIVATE = [0x44]  # 'D' - disarm
-CMD_SIREN_OFF = [0x4F]   # 'O' - turn off siren
+CMD_ACTIVATE = [0x41]           # 'A' - arm total
+CMD_ACTIVATE_STAY = [0x41, 0x50]  # 'A' + 'P' - arm partial/stay
+CMD_ACTIVATE_PART_A = [0x41, 0x41]  # 'A' + 'A' - arm partition A
+CMD_ACTIVATE_PART_B = [0x41, 0x42]  # 'A' + 'B' - arm partition B
+CMD_DEACTIVATE = [0x44]         # 'D' - disarm
+CMD_SIREN_OFF = [0x4F]          # 'O' - turn off siren
+CMD_PANIC = [0x45]              # 'E' - panic alarm (triggers siren)
 
 # Model names
 MODEL_NAMES = {
@@ -387,7 +391,7 @@ class CloudRelayClient:
         return parse_v1_status(data, total_zones)
 
     def arm(self) -> bool:
-        """Arm the alarm."""
+        """Arm the alarm in TOTAL/AWAY mode (all zones active)."""
         data = self._send_v1_command(CMD_ACTIVATE, recv_timeout=3.0)
         if data is None:
             return False
@@ -403,6 +407,31 @@ class CloudRelayClient:
                 logger.warning("Arm failed: incorrect password")
             else:
                 logger.warning(f"Arm response code: 0x{code:02X}")
+        return len(data) > 0
+
+    def arm_stay(self) -> bool:
+        """Arm the alarm in PARTIAL/STAY mode (interior zones bypassed)."""
+        data = self._send_v1_command(CMD_ACTIVATE_STAY, recv_timeout=3.0)
+        if data is None:
+            return False
+        if len(data) >= 2:
+            code = data[1]
+            if code == 0x00 or code == 0xFE:
+                return True
+            logger.warning(f"Arm-stay response code: 0x{code:02X}")
+        return len(data) > 0
+
+    def panic(self) -> bool:
+        """Trigger a panic alarm (siren + alarm)."""
+        data = self._send_v1_command(CMD_PANIC, recv_timeout=3.0)
+        if data is None:
+            return False
+        if len(data) >= 2:
+            code = data[1]
+            if code == 0x00 or code == 0xFE:
+                logger.info("Panic triggered successfully")
+                return True
+            logger.warning(f"Panic response code: 0x{code:02X}")
         return len(data) > 0
 
     def disarm(self) -> bool:

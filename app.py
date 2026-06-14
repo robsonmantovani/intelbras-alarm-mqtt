@@ -103,6 +103,8 @@ def publish_discovery(client: mqtt.Client, config: dict):
     }
 
     # --- Alarm Control Panel ---
+    # ANM 24 NET only supports 2 arm modes: ARM_AWAY (total) and ARM_HOME (partial)
+    # plus DISARM. Night/vacation/custom_bypass are not supported.
     alarm_payload = {
         "name": "Alarme Intelbras",
         "unique_id": f"{device_id}_panel",
@@ -114,23 +116,19 @@ def publish_discovery(client: mqtt.Client, config: dict):
         "payload_available": "online",
         "payload_not_available": "offline",
         "code_arm_required": "false",
+        # HA alarm_control_panel standard payloads
+        "payload_arm_away": "ARM_AWAY",
+        "payload_arm_home": "ARM_HOME",
+        "payload_arm_night": "ARM_HOME",  # map to partial (ANM has no night)
+        "payload_arm_custom_bypass": "ARM_AWAY",  # map to total
+        "payload_disarm": "DISARM",
     }
-    # Optional: support separate arm/disarm topics
-    alarm_payload["command_topic"] = f"{topic_base}/command/arm"
-    alarm_payload["payload_arm"] = "ON"
-    alarm_payload["payload_disarm"] = "OFF"
-    # Subscribe to a single combined topic doesn't work in HA, so use separate command topics:
-    # arm via /command/arm, disarm via /command/disarm (HA generates these for alarm_control_panel)
-    # For simplicity, we use one topic and accept the standard payloads
-    alarm_payload["command_topic"] = f"{topic_base}/command"
-    alarm_payload["payload_arm"] = "ARM"
-    alarm_payload["payload_disarm"] = "DISARM"
 
     client.publish(
         _discovery_topic(prefix, "alarm_control_panel", f"{device_id}_panel"),
         json.dumps(alarm_payload), retain=True,
     )
-    mqtt_logger.info(f"Published HA discovery: alarm_control_panel")
+    mqtt_logger.info(f"Published HA discovery: alarm_control_panel (ARM_AWAY, ARM_HOME, DISARM)")
 
     # --- Zone binary_sensors ---
     if zones_cfg:
@@ -311,9 +309,27 @@ class AlarmBridge:
         if not self._alarm:
             cloud_logger.error("Cannot arm: not connected to alarm")
             return False
-        cloud_logger.info("Sending ARM command to alarm...")
+        cloud_logger.info("Sending ARM AWAY (full) command to alarm...")
         result = self._alarm.arm()
         cloud_logger.info(f"Arm result: {'OK' if result else 'FAILED'}")
+        return result
+
+    def arm_stay(self) -> bool:
+        if not self._alarm:
+            cloud_logger.error("Cannot arm: not connected to alarm")
+            return False
+        cloud_logger.info("Sending ARM STAY (partial) command to alarm...")
+        result = self._alarm.arm_stay()
+        cloud_logger.info(f"Arm-stay result: {'OK' if result else 'FAILED'}")
+        return result
+
+    def panic(self) -> bool:
+        if not self._alarm:
+            cloud_logger.error("Cannot panic: not connected to alarm")
+            return False
+        cloud_logger.info("Sending PANIC command to alarm...")
+        result = self._alarm.panic()
+        cloud_logger.info(f"Panic result: {'OK' if result else 'FAILED'}")
         return result
 
     def disarm(self) -> bool:
@@ -369,26 +385,42 @@ class AlarmBridge:
         mqtt_logger.info(f"📩 MQTT message: topic={topic} payload={payload!r}")
 
         base = self.mqtt_cfg["topic_prefix"]
-        if topic == f"{base}/command/arm":
-            self.arm()
-        elif topic == f"{base}/command/disarm":
-            self.disarm()
+        payload_upper = payload.upper().strip()
+
+        # Alarm control commands
+        if topic == f"{base}/command":
+            # Payload-based dispatch (single command topic for HA alarm_control_panel)
+            if payload_upper == "ARM_AWAY":
+                cloud_logger.info("ARM_AWAY requested - activating alarm (full)")
+                self.arm()
+            elif payload_upper == "ARM_HOME":
+                cloud_logger.info("ARM_HOME requested - activating alarm (partial/stay)")
+                self.arm_stay()
+            elif payload_upper == "ARM_NIGHT":
+                # ANM 24 NET doesn't have night mode - fall back to partial
+                mqtt_logger.info("ARM_NIGHT not supported on ANM 24 NET, using ARM_HOME (partial)")
+                self.arm_stay()
+            elif payload_upper in ("DISARM", "DISARMED"):
+                self.disarm()
+            elif payload_upper == "PANIC":
+                cloud_logger.info("PANIC requested - sending panic command")
+                self.panic()
+            else:
+                mqtt_logger.warning(
+                    f"Unknown alarm command: {payload!r}. "
+                    f"Supported: ARM_AWAY, ARM_HOME, DISARM, PANIC"
+                )
+        # Siren control
         elif topic == f"{base}/siren/control":
-            if payload.upper() == "ON":
-                cloud_logger.info("Siren ON requested - triggering via bypass+arm hack")
-                self._trigger_siren_via_bypass()
-            elif payload.upper() == "OFF":
+            if payload_upper == "OFF":
                 self.siren_off()
+            else:
+                mqtt_logger.warning(
+                    f"Siren ON not directly supported by ANM 24 NET. "
+                    f"Use PANIC command or app."
+                )
         else:
             mqtt_logger.debug(f"Unhandled topic: {topic}")
-
-    def _trigger_siren_via_bypass(self):
-        """Best-effort: try to trigger siren by arming with one zone bypassed."""
-        # This is a stub - real implementation would need bypass+arm sequence
-        cloud_logger.warning(
-            "Siren trigger hack not fully implemented. "
-            "Consider using a physical panic button or AMT Mobile app."
-        )
 
     def _mqtt_publish_availability(self, status: str):
         if not self._mqtt_connected:
