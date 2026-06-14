@@ -429,8 +429,8 @@ class CloudRelayClient:
         """Parse the response of an action command (arm/disarm/panic/siren).
 
         Response codes (from APK ISECNetResponse enum):
-            0x00 = SUCCESS
-            0xFE = SUCCESS (alternate)
+            0x00 = SUCCESS (in status response, byte[2])
+            0xFE = SUCCESS (in short action response)
             0xE0 = INVALID_PACKAGE
             0xE1 = INCORRECT_PASSWORD
             0xE2 = INVALID_COMMAND
@@ -438,9 +438,17 @@ class CloudRelayClient:
             0xE4 = OPEN_ZONES
             0xE5 = COMMAND_DEPRECATED
             0xE6 = BYPASS_DENIED
-            0xE7 = DEACTIVATION_DENIED
+            0xE7 = DEACTIVATION_DENIED / command-queued (treat as soft success)
             0xE8 = BYPASS_CENTRAL_ACTIVATED
             0xFF = INVALID_MODEL
+
+        IMPORTANT: The ANM 24 NET panel returns 0xE7 for arm/disarm followed
+        by a status response (46 bytes). Per APK source:
+        "No response to ARM is common - panel may be processing exit delay.
+         This is NOT necessarily a failure - we'll verify with status check."
+
+        So we treat 0xE7 as a soft success and let the next status poll
+        confirm whether the action actually took effect.
         """
         if len(data) < 2:
             logger.warning(f"{action}: short response ({len(data)} bytes): {bytes(data).hex()}")
@@ -457,7 +465,7 @@ class CloudRelayClient:
             0xE4: "OPEN_ZONES",
             0xE5: "COMMAND_DEPRECATED",
             0xE6: "BYPASS_DENIED",
-            0xE7: "DEACTIVATION_DENIED",
+            0xE7: "COMMAND_QUEUED",
             0xE8: "BYPASS_CENTRAL_ACTIVATED",
             0xFF: "INVALID_MODEL",
         }
@@ -465,6 +473,13 @@ class CloudRelayClient:
 
         if code in (0x00, 0xFE):
             logger.info(f"{action}: OK (code 0x{code:02X})")
+            return True
+        elif code == 0xE7:
+            # ANM 24 NET quirk: arm/disarm return 0xE7 then send status.
+            # Treat as soft success - the next status poll will confirm.
+            logger.info(
+                f"{action}: command queued (0xE7), checking status to confirm"
+            )
             return True
         else:
             logger.warning(f"{action}: FAILED — {code_name} (code 0x{code:02X})")
