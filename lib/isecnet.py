@@ -392,64 +392,83 @@ class CloudRelayClient:
 
     def arm(self) -> bool:
         """Arm the alarm in TOTAL/AWAY mode (all zones active)."""
-        data = self._send_v1_command(CMD_ACTIVATE, recv_timeout=3.0)
+        data = self._send_v1_command(CMD_ACTIVATE, recv_timeout=5.0)
         if data is None:
             return False
-        # Check response code: data[1] should be 0x00 for success
-        # 0xE4 = open zones, 0xE1 = wrong password, etc.
-        if len(data) >= 2:
-            code = data[1]
-            if code == 0x00:
-                return True
-            elif code == 0xE4:
-                logger.warning("Arm failed: zones open")
-            elif code == 0xE1:
-                logger.warning("Arm failed: incorrect password")
-            else:
-                logger.warning(f"Arm response code: 0x{code:02X}")
-        return len(data) > 0
+        return self._parse_action_response(data, "Arm (AWAY)")
 
     def arm_stay(self) -> bool:
         """Arm the alarm in PARTIAL/STAY mode (interior zones bypassed)."""
-        data = self._send_v1_command(CMD_ACTIVATE_STAY, recv_timeout=3.0)
+        data = self._send_v1_command(CMD_ACTIVATE_STAY, recv_timeout=5.0)
         if data is None:
             return False
-        if len(data) >= 2:
-            code = data[1]
-            if code == 0x00 or code == 0xFE:
-                return True
-            logger.warning(f"Arm-stay response code: 0x{code:02X}")
-        return len(data) > 0
+        return self._parse_action_response(data, "Arm (STAY)")
 
     def panic(self) -> bool:
         """Trigger a panic alarm (siren + alarm)."""
-        data = self._send_v1_command(CMD_PANIC, recv_timeout=3.0)
+        data = self._send_v1_command(CMD_PANIC, recv_timeout=5.0)
         if data is None:
             return False
-        if len(data) >= 2:
-            code = data[1]
-            if code == 0x00 or code == 0xFE:
-                logger.info("Panic triggered successfully")
-                return True
-            logger.warning(f"Panic response code: 0x{code:02X}")
-        return len(data) > 0
+        return self._parse_action_response(data, "Panic")
 
     def disarm(self) -> bool:
         """Disarm the alarm."""
-        data = self._send_v1_command(CMD_DEACTIVATE, recv_timeout=3.0)
+        data = self._send_v1_command(CMD_DEACTIVATE, recv_timeout=5.0)
         if data is None:
             return False
-        if len(data) >= 2:
-            code = data[1]
-            if code == 0x00 or code == 0xFE:
-                return True
-            logger.warning(f"Disarm response code: 0x{code:02X}")
-        return len(data) > 0
+        return self._parse_action_response(data, "Disarm")
 
     def siren_off(self) -> bool:
         """Turn off siren."""
-        data = self._send_v1_command(CMD_SIREN_OFF, recv_timeout=3.0)
-        return data is not None
+        data = self._send_v1_command(CMD_SIREN_OFF, recv_timeout=5.0)
+        if data is None:
+            return False
+        return self._parse_action_response(data, "Siren off")
+
+    def _parse_action_response(self, data: list[int], action: str) -> bool:
+        """Parse the response of an action command (arm/disarm/panic/siren).
+
+        Response codes (from APK ISECNetResponse enum):
+            0x00 = SUCCESS
+            0xFE = SUCCESS (alternate)
+            0xE0 = INVALID_PACKAGE
+            0xE1 = INCORRECT_PASSWORD
+            0xE2 = INVALID_COMMAND
+            0xE3 = NO_PARTITIONS
+            0xE4 = OPEN_ZONES
+            0xE5 = COMMAND_DEPRECATED
+            0xE6 = BYPASS_DENIED
+            0xE7 = DEACTIVATION_DENIED
+            0xE8 = BYPASS_CENTRAL_ACTIVATED
+            0xFF = INVALID_MODEL
+        """
+        if len(data) < 2:
+            logger.warning(f"{action}: short response ({len(data)} bytes): {bytes(data).hex()}")
+            return False
+
+        code = data[1]
+        code_names = {
+            0x00: "SUCCESS",
+            0xFE: "SUCCESS",
+            0xE0: "INVALID_PACKAGE",
+            0xE1: "INCORRECT_PASSWORD",
+            0xE2: "INVALID_COMMAND",
+            0xE3: "NO_PARTITIONS",
+            0xE4: "OPEN_ZONES",
+            0xE5: "COMMAND_DEPRECATED",
+            0xE6: "BYPASS_DENIED",
+            0xE7: "DEACTIVATION_DENIED",
+            0xE8: "BYPASS_CENTRAL_ACTIVATED",
+            0xFF: "INVALID_MODEL",
+        }
+        code_name = code_names.get(code, f"UNKNOWN(0x{code:02X})")
+
+        if code in (0x00, 0xFE):
+            logger.info(f"{action}: OK (code 0x{code:02X})")
+            return True
+        else:
+            logger.warning(f"{action}: FAILED — {code_name} (code 0x{code:02X})")
+            return False
 
     @property
     def is_connected(self) -> bool:
