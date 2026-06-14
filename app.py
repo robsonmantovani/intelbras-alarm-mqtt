@@ -324,6 +324,8 @@ class AlarmBridge:
             return False
         cloud_logger.info("Sending ARM AWAY (full) command to alarm...")
         result = self._alarm.arm()
+        # Verify with actual status (panel may queue command but not execute)
+        result = self._verify_arm_state(result, expected_armed=True)
         cloud_logger.info(f"Arm result: {'OK' if result else 'FAILED'}")
         return result
 
@@ -333,6 +335,7 @@ class AlarmBridge:
             return False
         cloud_logger.info("Sending ARM STAY (partial) command to alarm...")
         result = self._alarm.arm_stay()
+        result = self._verify_arm_state(result, expected_armed=True)
         cloud_logger.info(f"Arm-stay result: {'OK' if result else 'FAILED'}")
         return result
 
@@ -351,8 +354,41 @@ class AlarmBridge:
             return False
         cloud_logger.info("Sending DISARM command to alarm...")
         result = self._alarm.disarm()
+        result = self._verify_arm_state(result, expected_armed=False)
         cloud_logger.info(f"Disarm result: {'OK' if result else 'FAILED'}")
         return result
+
+    def _verify_arm_state(self, reported: bool, expected_armed: bool) -> bool:
+        """Verify the arm/disarm actually took effect by polling status.
+
+        The ANM 24 NET returns 0xE7 (= soft 'queued') for arm/disarm and
+        sometimes lies - the real state may differ. We poll the panel
+        once and check the actual state.
+        """
+        if not reported or not self._alarm:
+            return reported
+        time.sleep(0.5)  # Give the panel a moment to process
+        try:
+            status = self._alarm.get_status(24)
+        except Exception as e:
+            cloud_logger.error(f"Status verify failed: {e}")
+            return reported
+
+        actually_armed = status.armed
+        expected_str = "armed" if expected_armed else "disarmed"
+        if actually_armed == expected_armed:
+            cloud_logger.info(
+                f"Status verify: panel is {status.arm_mode} ✓ (matches expected)"
+            )
+            return True
+        else:
+            cloud_logger.warning(
+                f"Status verify FAILED: panel reports {status.arm_mode} "
+                f"but we expected {expected_str}. "
+                f"Common causes: zones_open={status.zones_open}, "
+                f"siren={status.siren_triggered}"
+            )
+            return False
 
     def siren_off(self) -> bool:
         if not self._alarm:
