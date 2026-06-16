@@ -9,6 +9,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -272,7 +273,12 @@ class AlarmBridge:
         self._cloud_connected = False
         self._last_status: Optional[dict] = None
         self._consecutive_failures = 0
-        self._max_consecutive_failures = 5
+        # High threshold because the ANM 24 NET is slow to respond right
+        # after arm/disarm commands. Don't auto-reconnect on a few failures.
+        self._max_consecutive_failures = 20
+        # Lock to serialize access to the alarm (verify + poll can't both
+        # use the same socket at the same time)
+        self._alarm_lock = threading.Lock()
 
         # MQTT callbacks
         self.client.on_connect = self._on_mqtt_connect
@@ -330,11 +336,13 @@ class AlarmBridge:
             cloud_logger.info(
                 f"Bypassing zones {self.always_bypass_zones} before ARM"
             )
-            self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
+            with self._alarm_lock:
+                self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
             # Give the panel time to process bypass
             time.sleep(2)
         cloud_logger.info("Sending ARM AWAY (full) command to alarm...")
-        result = self._alarm.arm()
+        with self._alarm_lock:
+            result = self._alarm.arm()
         # Verify with actual status (panel may queue command but not execute)
         result = self._verify_arm_state(result, expected_armed=True)
         cloud_logger.info(f"Arm result: {'OK' if result else 'FAILED'}")
@@ -348,10 +356,12 @@ class AlarmBridge:
             cloud_logger.info(
                 f"Bypassing zones {self.always_bypass_zones} before ARM STAY"
             )
-            self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
+            with self._alarm_lock:
+                self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
             time.sleep(2)
         cloud_logger.info("Sending ARM STAY (partial) command to alarm...")
-        result = self._alarm.arm_stay()
+        with self._alarm_lock:
+            result = self._alarm.arm_stay()
         result = self._verify_arm_state(result, expected_armed=True)
         cloud_logger.info(f"Arm-stay result: {'OK' if result else 'FAILED'}")
         return result
@@ -361,7 +371,8 @@ class AlarmBridge:
             cloud_logger.error("Cannot panic: not connected to alarm")
             return False
         cloud_logger.info("Sending PANIC command to alarm...")
-        result = self._alarm.panic()
+        with self._alarm_lock:
+            result = self._alarm.panic()
         cloud_logger.info(f"Panic result: {'OK' if result else 'FAILED'}")
         return result
 
@@ -370,14 +381,16 @@ class AlarmBridge:
             cloud_logger.error("Cannot disarm: not connected to alarm")
             return False
         cloud_logger.info("Sending DISARM command to alarm...")
-        result = self._alarm.disarm()
+        with self._alarm_lock:
+            result = self._alarm.disarm()
         result = self._verify_arm_state(result, expected_armed=False)
         # Remove the bypass we set when arming, so zones return to normal
         if result and self.always_bypass_zones:
             cloud_logger.info(
                 f"Removing bypass for zones {self.always_bypass_zones}"
             )
-            self._alarm.bypass_zones(self.always_bypass_zones, bypass=False)
+            with self._alarm_lock:
+                self._alarm.bypass_zones(self.always_bypass_zones, bypass=False)
             time.sleep(2)
         cloud_logger.info(f"Disarm result: {'OK' if result else 'FAILED'}")
         return result
@@ -396,13 +409,16 @@ class AlarmBridge:
 
         # ANM 24 NET can take 10+ seconds to process arm/disarm.
         # Poll multiple times with increasing delays.
-        wait_times = [1, 2, 3, 5, 8, 12]
+        # IMPORTANT: do NOT trigger reconnect on verify poll failures -
+        # the panel is just busy and will eventually respond.
+        wait_times = [2, 5, 10]
         for wait in wait_times:
             time.sleep(wait)
             try:
-                status = self._alarm.get_status(24)
+                with self._alarm_lock:
+                    status = self._alarm.get_status(24)
             except Exception as e:
-                cloud_logger.error(f"Status verify failed: {e}")
+                cloud_logger.debug(f"Status verify poll error (will retry): {e}")
                 continue
 
             actually_armed = status.armed
@@ -418,14 +434,20 @@ class AlarmBridge:
             )
 
         # Final check - report failure with full context
-        status = self._alarm.get_status(24)
-        cloud_logger.warning(
-            f"Status verify FAILED after 31s: panel reports {status.arm_mode} "
-            f"but we expected {expected_str}. "
-            f"zones_open={status.zones_open}, "
-            f"siren={status.siren_triggered}, "
-            f"ac_loss={status.ac_power_loss}"
-        )
+        try:
+            with self._alarm_lock:
+                status = self._alarm.get_status(24)
+            cloud_logger.warning(
+                f"Status verify FAILED after 17s: panel reports {status.arm_mode} "
+                f"but we expected {expected_str}. "
+                f"zones_open={status.zones_open}, "
+                f"siren={status.siren_triggered}, "
+                f"ac_loss={status.ac_power_loss}"
+            )
+        except Exception:
+            cloud_logger.warning(
+                f"Status verify FAILED: could not reach panel to confirm"
+            )
         return False
 
     def siren_off(self) -> bool:
@@ -559,7 +581,8 @@ class AlarmBridge:
         try:
             total_zones = self.alarm_cfg.get("total_zones", 24)
             cloud_logger.debug(f"Polling alarm status (zones={total_zones})...")
-            status = self._alarm.get_status(total_zones)
+            with self._alarm_lock:
+                status = self._alarm.get_status(total_zones)
 
             # Check for NAK or short response (alarm refused the command)
             raw = status.raw_response or []
