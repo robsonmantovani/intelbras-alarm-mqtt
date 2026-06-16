@@ -211,18 +211,26 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
         pass
 
     # Partition armed bits at data[22]
+    # Bit 0 (LSB) = partition A armed
+    # Bit 1     = partition B armed
+    # Bit 2     = partition C armed
+    # Bit 3     = partition D armed
+    # Bit 4     = stay mode (armed_home/armed_stay)
     try:
-        bits = _int_to_bits(data[22])
-        status.partition_a = bool(int(bits[0]))
-        status.partition_b = bool(int(bits[1]))
-        status.partition_c = bool(int(bits[2]))
-        status.partition_d = bool(int(bits[3]))
+        p = data[22]
+        status.partition_a = bool(p & 0x01)
+        status.partition_b = bool(p & 0x02)
+        status.partition_c = bool(p & 0x04)
+        status.partition_d = bool(p & 0x08)
         status.armed = any([status.partition_a, status.partition_b,
                            status.partition_c, status.partition_d])
         if status.armed:
             all_armed = all([status.partition_a, status.partition_b,
                             status.partition_c, status.partition_d])
-            status.arm_mode = "armed_away" if all_armed else "armed_home"
+            # If any partition is in stay mode, treat as armed_home
+            # Otherwise armed_away (total)
+            is_stay = bool(p & 0x10)
+            status.arm_mode = "armed_home" if is_stay else "armed_away"
         else:
             status.arm_mode = "disarmed"
     except IndexError:
@@ -237,9 +245,10 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
     except IndexError:
         pass
 
-    # AC power from data[22] LSB
+    # AC power from data[22] bit 7 (MSB)
+    # 0 = AC power OK, 1 = AC power lost
     try:
-        status.ac_power_loss = bool(int(_int_to_bits(data[22])[7]))
+        status.ac_power_loss = bool(data[22] & 0x80)
     except IndexError:
         pass
 
