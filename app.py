@@ -340,6 +340,28 @@ class AlarmBridge:
                 self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
             # Give the panel time to process bypass
             time.sleep(2)
+        else:
+            # AUTO-BYPASS: check current status, and if any zones are open,
+            # try bypassing them automatically so arm doesn't fail.
+            cloud_logger.info(
+                "No always_bypass_zones configured - checking current "
+                "zones and auto-bypassing any open ones"
+            )
+            try:
+                with self._alarm_lock:
+                    cur_status = self._alarm.get_status(24)
+                if cur_status.zones_open:
+                    cloud_logger.info(
+                        f"Auto-bypassing currently open zones: "
+                        f"{cur_status.zones_open}"
+                    )
+                    with self._alarm_lock:
+                        self._alarm.bypass_zones(
+                            cur_status.zones_open, bypass=True
+                        )
+                    time.sleep(2)
+            except Exception as e:
+                cloud_logger.warning(f"Auto-bypass check failed: {e}")
         cloud_logger.info("Sending ARM AWAY (full) command to alarm...")
         with self._alarm_lock:
             result = self._alarm.arm()
@@ -359,6 +381,27 @@ class AlarmBridge:
             with self._alarm_lock:
                 self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
             time.sleep(2)
+        else:
+            # AUTO-BYPASS (same as arm)
+            cloud_logger.info(
+                "No always_bypass_zones configured - checking current "
+                "zones and auto-bypassing any open ones"
+            )
+            try:
+                with self._alarm_lock:
+                    cur_status = self._alarm.get_status(24)
+                if cur_status.zones_open:
+                    cloud_logger.info(
+                        f"Auto-bypassing currently open zones: "
+                        f"{cur_status.zones_open}"
+                    )
+                    with self._alarm_lock:
+                        self._alarm.bypass_zones(
+                            cur_status.zones_open, bypass=True
+                        )
+                    time.sleep(2)
+            except Exception as e:
+                cloud_logger.warning(f"Auto-bypass check failed: {e}")
         cloud_logger.info("Sending ARM STAY (partial) command to alarm...")
         with self._alarm_lock:
             result = self._alarm.arm_stay()
