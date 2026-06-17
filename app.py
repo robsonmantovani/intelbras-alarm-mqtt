@@ -331,83 +331,31 @@ class AlarmBridge:
         if not self._alarm:
             cloud_logger.error("Cannot arm: not connected to alarm")
             return False
-        # Bypass zones that should be ignored (e.g., panic button always open)
-        if self.always_bypass_zones:
-            cloud_logger.info(
-                f"Bypassing zones {self.always_bypass_zones} before ARM"
-            )
-            with self._alarm_lock:
-                self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
-            # Give the panel time to process bypass
-            time.sleep(2)
-        else:
-            # AUTO-BYPASS: check current status, and if any zones are open,
-            # try bypassing them automatically so arm doesn't fail.
-            cloud_logger.info(
-                "No always_bypass_zones configured - checking current "
-                "zones and auto-bypassing any open ones"
-            )
-            try:
-                with self._alarm_lock:
-                    cur_status = self._alarm.get_status(24)
-                if cur_status.zones_open:
-                    cloud_logger.info(
-                        f"Auto-bypassing currently open zones: "
-                        f"{cur_status.zones_open}"
-                    )
-                    with self._alarm_lock:
-                        self._alarm.bypass_zones(
-                            cur_status.zones_open, bypass=True
-                        )
-                    time.sleep(2)
-            except Exception as e:
-                cloud_logger.warning(f"Auto-bypass check failed: {e}")
         cloud_logger.info("Sending ARM AWAY (full) command to alarm...")
         with self._alarm_lock:
             result = self._alarm.arm()
-        # Verify with actual status (panel may queue command but not execute)
-        result = self._verify_arm_state(result, expected_armed=True)
-        cloud_logger.info(f"Arm result: {'OK' if result else 'FAILED'}")
-        return result
+        cloud_logger.info(f"ARM command sent: panel returned {result}")
+        # Quick verify - check if state changed (max 8s)
+        verified = self._verify_arm_state(result, expected_armed=True)
+        if verified:
+            # Force immediate status publish so HA updates fast
+            self.poll_once()
+        cloud_logger.info(f"Arm result: {'OK' if verified else 'FAILED'}")
+        return verified
 
     def arm_stay(self) -> bool:
         if not self._alarm:
             cloud_logger.error("Cannot arm: not connected to alarm")
             return False
-        if self.always_bypass_zones:
-            cloud_logger.info(
-                f"Bypassing zones {self.always_bypass_zones} before ARM STAY"
-            )
-            with self._alarm_lock:
-                self._alarm.bypass_zones(self.always_bypass_zones, bypass=True)
-            time.sleep(2)
-        else:
-            # AUTO-BYPASS (same as arm)
-            cloud_logger.info(
-                "No always_bypass_zones configured - checking current "
-                "zones and auto-bypassing any open ones"
-            )
-            try:
-                with self._alarm_lock:
-                    cur_status = self._alarm.get_status(24)
-                if cur_status.zones_open:
-                    cloud_logger.info(
-                        f"Auto-bypassing currently open zones: "
-                        f"{cur_status.zones_open}"
-                    )
-                    with self._alarm_lock:
-                        self._alarm.bypass_zones(
-                            cur_status.zones_open, bypass=True
-                        )
-                    time.sleep(2)
-            except Exception as e:
-                cloud_logger.warning(f"Auto-bypass check failed: {e}")
         cloud_logger.info("Sending ARM STAY (partial) command to alarm...")
         with self._alarm_lock:
             result = self._alarm.arm_stay()
-        result = self._verify_arm_state(result, expected_armed=True)
-        cloud_logger.info(f"Arm-stay result: {'OK' if result else 'FAILED'}")
-        return result
+        cloud_logger.info(f"ARM STAY command sent: panel returned {result}")
+        verified = self._verify_arm_state(result, expected_armed=True)
+        if verified:
+            self.poll_once()
+        cloud_logger.info(f"Arm-stay result: {'OK' if verified else 'FAILED'}")
+        return verified
 
     def panic(self) -> bool:
         if not self._alarm:
@@ -426,72 +374,47 @@ class AlarmBridge:
         cloud_logger.info("Sending DISARM command to alarm...")
         with self._alarm_lock:
             result = self._alarm.disarm()
-        result = self._verify_arm_state(result, expected_armed=False)
-        # Remove the bypass we set when arming, so zones return to normal
-        if result and self.always_bypass_zones:
-            cloud_logger.info(
-                f"Removing bypass for zones {self.always_bypass_zones}"
-            )
-            with self._alarm_lock:
-                self._alarm.bypass_zones(self.always_bypass_zones, bypass=False)
-            time.sleep(2)
-        cloud_logger.info(f"Disarm result: {'OK' if result else 'FAILED'}")
-        return result
+        cloud_logger.info(f"DISARM command sent: panel returned {result}")
+        verified = self._verify_arm_state(result, expected_armed=False)
+        if verified:
+            self.poll_once()
+        cloud_logger.info(f"Disarm result: {'OK' if verified else 'FAILED'}")
+        return verified
 
     def _verify_arm_state(self, reported: bool, expected_armed: bool) -> bool:
-        """Verify the arm/disarm actually took effect by polling status.
+        """Verify the arm/disarm took effect.
 
-        The ANM 24 NET is SLOW to process arm/disarm commands. The first
-        response from the panel may indicate the command was queued
-        (code 0xE7) but the actual state change happens 2-10 seconds later.
+        Strategy: poll the panel a few times (max ~8s) to see if the state
+        changed. The ANM 24 NET typically responds within 1-3 seconds.
+        We don't block for 25s - if the state hasn't changed by then, we
+        return the panel's original response.
         """
         if not self._alarm:
             return reported
 
         expected_str = "armed" if expected_armed else "disarmed"
-
-        # Quick check first - the alarme usually processes in 2-5s
-        # Don't take no for an answer on the first response - it can lie
-        # (returns 0xE7 immediately even when the action succeeded)
-        wait_times = [3, 7, 12, 18, 25]
+        # Quick checks: 1s, 2s, 3s, 5s (max 8s total)
+        wait_times = [1, 2, 3, 5]
         for wait in wait_times:
             time.sleep(wait)
             try:
                 with self._alarm_lock:
                     status = self._alarm.get_status(24)
             except Exception as e:
-                cloud_logger.debug(f"Status verify poll error (will retry): {e}")
+                cloud_logger.debug(f"Poll error: {e}")
                 continue
 
-            actually_armed = status.armed
-            if actually_armed == expected_armed:
+            if status.armed == expected_armed:
                 cloud_logger.info(
-                    f"Status verify: panel is {status.arm_mode} ✓ "
-                    f"(matched expected after {wait}s)"
+                    f"Panel reached {expected_str} after {wait}s ✓"
                 )
                 return True
-            cloud_logger.debug(
-                f"Status verify: panel still {status.arm_mode} "
-                f"after {wait}s, waiting more..."
-            )
 
-        # Final check - report failure with full context
-        try:
-            with self._alarm_lock:
-                status = self._alarm.get_status(24)
-            cloud_logger.warning(
-                f"Status verify FAILED: panel reports {status.arm_mode} "
-                f"but we expected {expected_str}. "
-                f"zones_open={status.zones_open}, "
-                f"siren={status.siren_triggered}"
-            )
-        except Exception:
-            cloud_logger.warning(
-                f"Status verify FAILED: could not reach panel to confirm"
-            )
-        # IMPORTANT: even if verify fails, if the command was reported OK
-        # by the panel, the action may have actually worked. Don't
-        # double-report FAILED when the panel is just being slow.
+        # If we got here, panel hasn't reached expected state in 11s
+        # Return the original 'reported' value as best guess
+        cloud_logger.info(
+            f"State still changing - returning panel response: {reported}"
+        )
         return reported
 
     def siren_off(self) -> bool:

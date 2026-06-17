@@ -515,15 +515,13 @@ class CloudRelayClient:
         }
         code_name = code_names.get(code, f"UNKNOWN(0x{code:02X})")
 
-        if code in (0x00, 0xFE):
-            logger.info(f"{action}: OK (code 0x{code:02X})")
-            return True
-        elif code == 0xE7:
-            # ANM 24 NET quirk: arm/disarm return 0xE7 then send status.
-            # Treat as soft success - the next status poll will confirm.
-            logger.info(
-                f"{action}: command queued (0xE7), checking status to confirm"
-            )
+        if code in (0x00, 0xFE, 0xE7):
+            # 0xE7 (DEACTIVATION_DENIED) is treated as a soft success
+            # because the ANM 24 NET panel can return this when the
+            # action actually works but the panel is processing other
+            # commands. The next status poll will confirm.
+            label = "OK" if code in (0x00, 0xFE) else "queued"
+            logger.info(f"{action}: {label} (code 0x{code:02X})")
             return True
         else:
             logger.warning(f"{action}: FAILED — {code_name} (code 0x{code:02X})")
