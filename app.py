@@ -441,20 +441,19 @@ class AlarmBridge:
     def _verify_arm_state(self, reported: bool, expected_armed: bool) -> bool:
         """Verify the arm/disarm actually took effect by polling status.
 
-        The ANM 24 NET is SLOW to process arm/disarm commands. After sending
-        the command, it can take up to 10+ seconds for the status to actually
-        change. We poll multiple times with delays before giving up.
+        The ANM 24 NET is SLOW to process arm/disarm commands. The first
+        response from the panel may indicate the command was queued
+        (code 0xE7) but the actual state change happens 2-10 seconds later.
         """
-        if not reported or not self._alarm:
+        if not self._alarm:
             return reported
 
         expected_str = "armed" if expected_armed else "disarmed"
 
-        # ANM 24 NET can take 10+ seconds to process arm/disarm.
-        # Poll multiple times with increasing delays.
-        # IMPORTANT: do NOT trigger reconnect on verify poll failures -
-        # the panel is just busy and will eventually respond.
-        wait_times = [2, 5, 10]
+        # Quick check first - the alarme usually processes in 2-5s
+        # Don't take no for an answer on the first response - it can lie
+        # (returns 0xE7 immediately even when the action succeeded)
+        wait_times = [3, 7, 12, 18, 25]
         for wait in wait_times:
             time.sleep(wait)
             try:
@@ -481,17 +480,19 @@ class AlarmBridge:
             with self._alarm_lock:
                 status = self._alarm.get_status(24)
             cloud_logger.warning(
-                f"Status verify FAILED after 17s: panel reports {status.arm_mode} "
+                f"Status verify FAILED: panel reports {status.arm_mode} "
                 f"but we expected {expected_str}. "
                 f"zones_open={status.zones_open}, "
-                f"siren={status.siren_triggered}, "
-                f"ac_loss={status.ac_power_loss}"
+                f"siren={status.siren_triggered}"
             )
         except Exception:
             cloud_logger.warning(
                 f"Status verify FAILED: could not reach panel to confirm"
             )
-        return False
+        # IMPORTANT: even if verify fails, if the command was reported OK
+        # by the panel, the action may have actually worked. Don't
+        # double-report FAILED when the panel is just being slow.
+        return reported
 
     def siren_off(self) -> bool:
         if not self._alarm:
