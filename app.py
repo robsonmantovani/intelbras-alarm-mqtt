@@ -182,16 +182,32 @@ def publish_discovery(client: mqtt.Client, config: dict):
         )
     mqtt_logger.info(f"Published HA discovery: {len(zone_list)} zone binary_sensors")
 
-    # --- Siren ---
+    # --- Siren (currently sounding) ---
     client.publish(
         _discovery_topic(prefix, "binary_sensor", f"{device_id}_siren"),
         json.dumps({
-            "name": "Sirene",
+            "name": "Sirene Tocando",
             "unique_id": f"{device_id}_siren",
             "device": device,
             "state_topic": f"{topic_base}/status",
             "value_template": "{{ 'ON' if value_json.siren_triggered else 'OFF' }}",
             "device_class": "sound",
+            "payload_on": "ON", "payload_off": "OFF",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    # --- Alarm Triggered (panel was triggered by zone) ---
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_alarm"),
+        json.dumps({
+            "name": "Alarme Disparado",
+            "unique_id": f"{device_id}_alarm",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'ON' if value_json.alarm_triggered else 'OFF' }}",
+            "device_class": "safety",
             "payload_on": "ON", "payload_off": "OFF",
             "availability_topic": f"{topic_base}/availability",
             "payload_available": "online", "payload_not_available": "offline",
@@ -248,7 +264,7 @@ def publish_discovery(client: mqtt.Client, config: dict):
 
     mqtt_logger.info(
         "Published HA discovery: alarm_control_panel, "
-        f"{len(zone_list)} zones, siren, AC power, battery, tamper"
+        f"{len(zone_list)} zones, siren, alarm, AC power, battery, tamper"
     )
 
 
@@ -531,6 +547,7 @@ class AlarmBridge:
             "zones_bypassed": status.zones_bypassed,
             "total_zones": status.total_zones,
             "siren_triggered": status.siren_triggered,
+            "alarm_triggered": status.alarm_triggered,
             "ac_power_loss": status.ac_power_loss,
             "battery_low": status.battery_low,
             "tamper": status.tamper,

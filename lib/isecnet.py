@@ -74,6 +74,7 @@ class AlarmStatus:
     zones_bypassed: list[int] = field(default_factory=list)
     total_zones: int = 24
     siren_triggered: bool = False
+    alarm_triggered: bool = False
     ac_power_loss: bool = False
     battery_low: bool = False
     tamper: bool = False
@@ -252,11 +253,17 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
     except IndexError:
         pass
 
-    # Siren/output at data[38]
+    # Output/alarm byte at data[38]
+    # For ANM 24 NET / AMT 2018 family:
+    #   bit 2 (0x04) = alarm flag (panel was triggered by zone)
+    #   bit 7 (0x80) = siren is currently sounding
     try:
-        bits38 = _int_to_bits(data[38])
-        status.siren_triggered = bool(int(bits38[4]))
-        status.tamper = bool(int(bits38[3]))
+        output_byte = data[38]
+        status.alarm_triggered = bool(output_byte & 0x04)
+        status.siren_triggered = bool(output_byte & 0x80)
+        # Tamper (violação do gabinete) - bit 4 according to some sources,
+        # but it may be elsewhere. Set conservatively to False.
+        status.tamper = False
     except IndexError:
         pass
 
