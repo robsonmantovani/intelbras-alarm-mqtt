@@ -37,14 +37,18 @@ CMD_EXTENDED_STATUS = [0x5B]  # AMT 4010 Smart (~96 bytes)
 CMD_SMART_STATUS = [0x5D]     # AMT 2018 E Smart (135+ bytes)
 
 # V1 Action commands
-CMD_ACTIVATE = [0x41]           # 'A' - arm total
-CMD_ACTIVATE_STAY = [0x41, 0x50]  # 'A' + 'P' - arm partial/stay
-CMD_ACTIVATE_PART_A = [0x41, 0x41]  # 'A' + 'A' - arm partition A
+# IMPORTANT: The ANM 24 NET requires the partition byte after the command!
+# Single-byte commands (just 0x41 or 0x44) return 0xE7 (DEACTIVATION_DENIED).
+# You must include the partition byte: 0x41/0x44 + 0x41 (partition A) or 0x42 (B)
+CMD_ACTIVATE = [0x41, 0x41]        # 'A' + 'A' - arm partition A (total)
 CMD_ACTIVATE_PART_B = [0x41, 0x42]  # 'A' + 'B' - arm partition B
-CMD_DEACTIVATE = [0x44]         # 'D' - disarm
-CMD_SIREN_OFF = [0x4F]          # 'O' - turn off siren
-CMD_PANIC = [0x45]              # 'E' - panic alarm (triggers siren)
-CMD_BYPASS = 0x42               # 'B' - bypass zones (followed by bitmask)
+CMD_ACTIVATE_STAY = [0x41, 0x41, 0x50]  # 'A' + 'A' + 'P' - arm partition A stay
+CMD_ACTIVATE_STAY_B = [0x41, 0x42, 0x50]  # 'A' + 'B' + 'P' - arm partition B stay
+CMD_DEACTIVATE = [0x44, 0x41]      # 'D' + 'A' - disarm partition A
+CMD_DEACTIVATE_PART_B = [0x44, 0x42]  # 'D' + 'B' - disarm partition B
+CMD_SIREN_OFF = [0x4F]             # 'O' - turn off siren
+CMD_PANIC = [0x45]                 # 'E' - panic alarm (triggers siren)
+CMD_BYPASS = 0x42                  # 'B' - bypass zones (followed by bitmask)
 
 # Model names
 MODEL_NAMES = {
