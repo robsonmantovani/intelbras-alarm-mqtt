@@ -150,24 +150,6 @@ def publish_discovery(client: mqtt.Client, config: dict):
         }), retain=True,
     )
 
-    # --- Silent panic button ---
-    # NOTE: The ANM 24 NET V1 protocol does NOT support silent panic.
-    # This button is provided for API compatibility with HA, but the
-    # command will be rejected by the panel (returns 0xE2 INVALID_COMMAND).
-    # Use the regular Panic button instead.
-    client.publish(
-        _discovery_topic(prefix, "button", f"{device_id}_silent_panic"),
-        json.dumps({
-            "name": "Pânico Silencioso (não suportado)",
-            "unique_id": f"{device_id}_silent_panic",
-            "device": device,
-            "command_topic": f"{topic_base}/silent_panic",
-            "payload_press": "PRESS",
-            "availability_topic": f"{topic_base}/availability",
-            "payload_available": "online", "payload_not_available": "offline",
-        }), retain=True,
-    )
-
     # --- Siren off button (turn off the siren) ---
     client.publish(
         _discovery_topic(prefix, "button", f"{device_id}_siren_off"),
@@ -181,7 +163,7 @@ def publish_discovery(client: mqtt.Client, config: dict):
             "payload_available": "online", "payload_not_available": "offline",
         }), retain=True,
     )
-    mqtt_logger.info(f"Published HA discovery: 3 buttons (panic, silent_panic, siren_off)")
+    mqtt_logger.info(f"Published HA discovery: 2 buttons (panic, siren_off)")
 
     # --- Zone binary_sensors ---
     if zones_cfg:
@@ -532,13 +514,6 @@ class AlarmBridge:
         elif topic == f"{base}/panic":
             cloud_logger.info("Panic button pressed - sending PANIC command")
             self.panic()
-        # Silent panic button
-        elif topic == f"{base}/silent_panic":
-            # ANM 24 NET V1 does not support silent panic
-            mqtt_logger.warning(
-                "Silent panic not supported by ANM 24 NET V1 protocol. "
-                "The panel will reject this command (0xE2 INVALID_COMMAND)."
-            )
         # Siren off button
         elif topic == f"{base}/siren_off":
             cloud_logger.info("Siren off button pressed - turning off siren")
