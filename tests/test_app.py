@@ -1,9 +1,9 @@
 """Unit tests for app.py (config loading, status dict, MQTT dispatch)."""
-import sys
-import unittest
-import tempfile
 import os
+import sys
+import tempfile
 import threading
+import unittest
 from pathlib import Path
 
 # Add project root to path

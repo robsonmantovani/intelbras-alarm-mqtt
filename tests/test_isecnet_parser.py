@@ -7,9 +7,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.isecnet import (
-    _checksum, _int_to_bits, _build_v1_frame, _parse_zone_status,
-    parse_v1_status, parse_action_code,
-    CMD_PANIC_AUDIBLE, CMD_ACTIVATE, CMD_DEACTIVATE,
+    CMD_ACTIVATE,
+    CMD_PANIC_AUDIBLE,
+    _build_v1_frame,
+    _checksum,
+    _int_to_bits,
+    _parse_zone_status,
+    parse_action_code,
+    parse_v1_status,
 )
 
 

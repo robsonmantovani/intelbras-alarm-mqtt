@@ -223,21 +223,50 @@ serialization.
 python3 -m unittest discover tests -v
 ```
 
-Expected output: `Ran 46 tests in 0.03s — OK`
+Expected output: `Ran 55 tests in 0.04s — OK`
 
 Tests are also run automatically in CI by the
 [`.github/workflows/docker-build.yml`](.github/workflows/docker-build.yml)
 `test` job on every push and pull request.
 
+### Coverage
+
+Coverage is measured with `coverage.py` and reported in CI. To run
+locally:
+
+```bash
+pip install -r requirements-dev.txt
+coverage run --source=app,lib -m unittest discover tests
+coverage report
+```
+
+Current coverage: ~52% (focused on protocol parsing, config, and MQTT
+dispatch — the main polling loop is integration-tested via real hardware).
+
+### Linting
+
+The project uses [ruff](https://github.com/astral-sh/ruff) for fast
+linting. To run locally:
+
+```bash
+pip install ruff
+ruff check app.py lib/ tests/
+```
+
+CI fails the build if any lint error is found. Configuration lives in
+[`pyproject.toml`](pyproject.toml).
+
 ### Adding tests
 
 Tests live in `tests/` and follow the standard `unittest` framework
-conventions. Two files are present today:
+conventions. Three files are present today:
 
 - `tests/test_isecnet_parser.py` — Protocol parsing (checksum, framing,
   status response, zone bitmaps, action codes)
 - `tests/test_app.py` — Config loading, status serialization, MQTT
   command dispatch
+- `tests/test_mqtt_integration.py` — MQTT publishing and command
+  reception using a mocked paho-mqtt client
 
 When adding a new feature or fixing a bug, please include a test that
 covers the new behavior.

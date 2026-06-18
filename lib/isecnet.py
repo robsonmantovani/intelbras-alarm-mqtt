@@ -9,11 +9,12 @@ Protocol flow (V1 Cloud):
 3. After CONNECT success, use ISECNet V1 commands (0xE9 frames) directly
 """
 
+from __future__ import annotations
+
+import logging
 import socket
 import time
-import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger("isecnet")
 
@@ -105,7 +106,7 @@ class AlarmStatus:
     firmware_version: str = ""
     firmware_version_number: int = 0
     date_time: str = ""
-    raw_response: Optional[list[int]] = None
+    raw_response: list[int] | None = None
 
 
 def _checksum(data: list[int]) -> int:
@@ -330,7 +331,7 @@ class CloudRelayClient:
         self.server = server
         self.port = port
         self.timeout = timeout
-        self._sock: Optional[socket.socket] = None
+        self._sock: socket.socket | None = None
         self._byte_value: int = 0
         self._connected = False
 
@@ -403,11 +404,11 @@ class CloudRelayClient:
                 if not chunk:
                     break
                 data += chunk
-        except socket.timeout:
+        except TimeoutError:
             pass
         return data
 
-    def _send_v1_command(self, command: list[int], recv_timeout: float = 5.0) -> Optional[list[int]]:
+    def _send_v1_command(self, command: list[int], recv_timeout: float = 5.0) -> list[int] | None:
         """Send ISECNet V1 command and return response payload.
 
         Response framing: the response MAY have a 1-byte size prefix

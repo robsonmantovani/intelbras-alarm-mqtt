@@ -1,0 +1,6 @@
+# Production dependencies
+-r requirements.txt
+
+# Test dependencies
+coverage>=7.0
+ruff>=0.5.0

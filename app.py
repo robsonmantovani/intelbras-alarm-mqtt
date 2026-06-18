@@ -12,12 +12,11 @@ import sys
 import threading
 import time
 from datetime import datetime
-from typing import Optional, Dict, Any
 
 import paho.mqtt.client as mqtt
 import yaml
 
-from lib.isecnet import CloudRelayClient, AlarmStatus
+from lib.isecnet import AlarmStatus, CloudRelayClient
 
 logger = logging.getLogger("int-alarm")
 
@@ -51,7 +50,7 @@ def load_config(path: str) -> dict:
         "zones": {},
     }
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path) as f:
             user_config = yaml.safe_load(f) or {}
         config["alarm"].update(user_config.get("alarm") or {})
         config["mqtt"].update(user_config.get("mqtt") or {})
@@ -134,7 +133,7 @@ def publish_discovery(client: mqtt.Client, config: dict):
         _discovery_topic(prefix, "alarm_control_panel", f"{device_id}_panel"),
         json.dumps(alarm_payload), retain=True,
     )
-    mqtt_logger.info(f"Published HA discovery: alarm_control_panel (ARM_AWAY, ARM_HOME, DISARM)")
+    mqtt_logger.info("Published HA discovery: alarm_control_panel (ARM_AWAY, ARM_HOME, DISARM)")
 
     # --- Emergency button (audible panic) ---
     # On the ANM 24 NET, this is the "Emergency" button in the AMT
@@ -152,7 +151,7 @@ def publish_discovery(client: mqtt.Client, config: dict):
             "payload_available": "online", "payload_not_available": "offline",
         }), retain=True,
     )
-    mqtt_logger.info(f"Published HA discovery: 1 button (emergency)")
+    mqtt_logger.info("Published HA discovery: 1 button (emergency)")
 
     # --- Diagnostic sensors (firmware, last_update, connected, etc) ---
     # These expose the metadata fields from the panel status payload
@@ -337,7 +336,7 @@ class AlarmBridge:
         # Zones that should be bypassed before arming (e.g., a panic button
         # that's always "open" but shouldn't prevent the alarm from arming)
         self.always_bypass_zones = config.get("always_bypass_zones", []) or []
-        self._alarm: Optional[CloudRelayClient] = None
+        self._alarm: CloudRelayClient | None = None
         self.client = mqtt.Client(
             client_id=self.mqtt_cfg["client_id"],
             protocol=mqtt.MQTTv311,
@@ -345,7 +344,7 @@ class AlarmBridge:
         self._running = True
         self._mqtt_connected = False
         self._cloud_connected = False
-        self._last_status: Optional[dict] = None
+        self._last_status: dict | None = None
         self._consecutive_failures = 0
         # High threshold because the ANM 24 NET is slow to respond right
         # after arm/disarm commands. Don't auto-reconnect on a few failures.
@@ -568,8 +567,8 @@ class AlarmBridge:
                 )
             else:
                 mqtt_logger.warning(
-                    f"Siren ON not directly supported by ANM 24 NET. "
-                    f"Use the app's panic feature."
+                    "Siren ON not directly supported by ANM 24 NET. "
+                    "Use the app's panic feature."
                 )
         # Emergency button (HA button entity - "Emergência" in app)
         elif topic == f"{base}/emergency":
