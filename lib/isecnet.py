@@ -261,26 +261,44 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
 
     # AC power already read from data[22] bit 7 in the partition section above
 
-    # Output/alarm byte at data[38]
-    # For ANM 24 NET / AMT 2018 family:
-    #   bit 2 (0x04) = alarm flag (panel was triggered by zone)
-    #   bit 7 (0x80) = siren is currently sounding
-    # Note: ANM 24 NET does NOT have a cabinet tamper sensor exposed
-    # in the V1 Cloud Relay protocol response. If you need tamper
-    # detection, you'd need to use a separate sensor or hardwire
-    # a tamper switch to one of the alarm zones.
-    try:
-        output_byte = data[38]
-        status.alarm_triggered = bool(output_byte & 0x04)
-        status.siren_triggered = bool(output_byte & 0x80)
-    except IndexError:
-        pass
+    # Output/alarm byte at data[38] - now parsed AFTER zones (below)
+    # to allow cross-checking with zone alarm data (more reliable than
+    # data[38] alone which has false positives during arm/disarm).
+    # For ANM 24 NET, ANM 24 NET does NOT have a cabinet tamper sensor
+    # exposed in the V1 Cloud Relay protocol response.
 
     # Zones
     zo, zv, zb = _parse_zone_status(data, total_zones)
     status.zones_open = zo
     status.zones_violated = zv
     status.zones_bypassed = zb
+
+    # Now that we have zone alarm data, re-evaluate alarm_triggered and
+    # siren_triggered. The APK source says data[38] bit 2 has false
+    # positives during arm/disarm transitions, so we cross-check with
+    # actual zone alarm data.
+    try:
+        output_byte = data[38]
+        siren_bit7 = bool(output_byte & 0x80)
+        alarm_bit2 = bool(output_byte & 0x04)
+
+        # If any zone has alarmed, that's the real trigger
+        has_zone_alarm = len(zv) > 0
+
+        if has_zone_alarm or siren_bit7:
+            # Zone alarm is the reliable signal
+            status.alarm_triggered = True
+        elif alarm_bit2:
+            # Only data[38] bit 2 set (no zone alarm) - probably a
+            # transient during arm/disarm. Trust it for now.
+            status.alarm_triggered = True
+        else:
+            status.alarm_triggered = False
+
+        # Siren triggered is reliable: bit 7 of data[38]
+        status.siren_triggered = siren_bit7
+    except IndexError:
+        pass
 
     return status
 

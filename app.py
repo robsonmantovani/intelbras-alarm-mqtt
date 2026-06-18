@@ -136,6 +136,53 @@ def publish_discovery(client: mqtt.Client, config: dict):
     )
     mqtt_logger.info(f"Published HA discovery: alarm_control_panel (ARM_AWAY, ARM_HOME, DISARM)")
 
+    # --- Panic button (audible) ---
+    client.publish(
+        _discovery_topic(prefix, "button", f"{device_id}_panic"),
+        json.dumps({
+            "name": "Pânico Audível",
+            "unique_id": f"{device_id}_panic",
+            "device": device,
+            "command_topic": f"{topic_base}/panic",
+            "payload_press": "PRESS",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    # --- Silent panic button ---
+    # NOTE: The ANM 24 NET V1 protocol does NOT support silent panic.
+    # This button is provided for API compatibility with HA, but the
+    # command will be rejected by the panel (returns 0xE2 INVALID_COMMAND).
+    # Use the regular Panic button instead.
+    client.publish(
+        _discovery_topic(prefix, "button", f"{device_id}_silent_panic"),
+        json.dumps({
+            "name": "Pânico Silencioso (não suportado)",
+            "unique_id": f"{device_id}_silent_panic",
+            "device": device,
+            "command_topic": f"{topic_base}/silent_panic",
+            "payload_press": "PRESS",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+
+    # --- Siren off button (turn off the siren) ---
+    client.publish(
+        _discovery_topic(prefix, "button", f"{device_id}_siren_off"),
+        json.dumps({
+            "name": "Desligar Sirene",
+            "unique_id": f"{device_id}_siren_off",
+            "device": device,
+            "command_topic": f"{topic_base}/siren_off",
+            "payload_press": "PRESS",
+            "availability_topic": f"{topic_base}/availability",
+            "payload_available": "online", "payload_not_available": "offline",
+        }), retain=True,
+    )
+    mqtt_logger.info(f"Published HA discovery: 3 buttons (panic, silent_panic, siren_off)")
+
     # --- Zone binary_sensors ---
     if zones_cfg:
         # Only publish zones listed in config
@@ -182,23 +229,10 @@ def publish_discovery(client: mqtt.Client, config: dict):
         )
     mqtt_logger.info(f"Published HA discovery: {len(zone_list)} zone binary_sensors")
 
-    # --- Siren (currently sounding) ---
-    client.publish(
-        _discovery_topic(prefix, "binary_sensor", f"{device_id}_siren"),
-        json.dumps({
-            "name": "Sirene Tocando",
-            "unique_id": f"{device_id}_siren",
-            "device": device,
-            "state_topic": f"{topic_base}/status",
-            "value_template": "{{ 'ON' if value_json.siren_triggered else 'OFF' }}",
-            "device_class": "sound",
-            "payload_on": "ON", "payload_off": "OFF",
-            "availability_topic": f"{topic_base}/availability",
-            "payload_available": "online", "payload_not_available": "offline",
-        }), retain=True,
-    )
-
-    # --- Alarm Triggered (panel was triggered by zone) ---
+    # --- Alarm Triggered (panel was triggered by zone OR panic pressed) ---
+    # Combined sensor: covers zone alarms, panic, and silent panic.
+    # The ANM 24 NET V1 protocol doesn't reliably report siren vs alarm
+    # state to the Cloud Relay, so we use one combined sensor.
     client.publish(
         _discovery_topic(prefix, "binary_sensor", f"{device_id}_alarm"),
         json.dumps({
@@ -495,6 +529,21 @@ class AlarmBridge:
                     f"Siren ON not directly supported by ANM 24 NET. "
                     f"Use PANIC command or app."
                 )
+        # Panic button (HA button entity)
+        elif topic == f"{base}/panic":
+            cloud_logger.info("Panic button pressed - sending PANIC command")
+            self.panic()
+        # Silent panic button
+        elif topic == f"{base}/silent_panic":
+            # ANM 24 NET V1 does not support silent panic
+            mqtt_logger.warning(
+                "Silent panic not supported by ANM 24 NET V1 protocol. "
+                "The panel will reject this command (0xE2 INVALID_COMMAND)."
+            )
+        # Siren off button
+        elif topic == f"{base}/siren_off":
+            cloud_logger.info("Siren off button pressed - turning off siren")
+            self.siren_off()
         else:
             mqtt_logger.debug(f"Unhandled topic: {topic}")
 
