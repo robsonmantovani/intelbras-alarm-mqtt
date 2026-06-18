@@ -77,7 +77,6 @@ class AlarmStatus:
     alarm_triggered: bool = False
     ac_power_loss: bool = False
     battery_low: bool = False
-    tamper: bool = False
     firmware_version: str = ""
     firmware_version_number: int = 0
     date_time: str = ""
@@ -257,13 +256,14 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
     # For ANM 24 NET / AMT 2018 family:
     #   bit 2 (0x04) = alarm flag (panel was triggered by zone)
     #   bit 7 (0x80) = siren is currently sounding
+    # Note: ANM 24 NET does NOT have a cabinet tamper sensor exposed
+    # in the V1 Cloud Relay protocol response. If you need tamper
+    # detection, you'd need to use a separate sensor or hardwire
+    # a tamper switch to one of the alarm zones.
     try:
         output_byte = data[38]
         status.alarm_triggered = bool(output_byte & 0x04)
         status.siren_triggered = bool(output_byte & 0x80)
-        # Tamper (violação do gabinete) - bit 4 according to some sources,
-        # but it may be elsewhere. Set conservatively to False.
-        status.tamper = False
     except IndexError:
         pass
 

@@ -246,25 +246,9 @@ def publish_discovery(client: mqtt.Client, config: dict):
         }), retain=True,
     )
 
-    # --- Tamper ---
-    client.publish(
-        _discovery_topic(prefix, "binary_sensor", f"{device_id}_tamper"),
-        json.dumps({
-            "name": "Violação (Tamper)",
-            "unique_id": f"{device_id}_tamper",
-            "device": device,
-            "state_topic": f"{topic_base}/status",
-            "value_template": "{{ 'ON' if value_json.tamper else 'OFF' }}",
-            "device_class": "tamper",
-            "payload_on": "ON", "payload_off": "OFF",
-            "availability_topic": f"{topic_base}/availability",
-            "payload_available": "online", "payload_not_available": "offline",
-        }), retain=True,
-    )
-
     mqtt_logger.info(
         "Published HA discovery: alarm_control_panel, "
-        f"{len(zone_list)} zones, siren, alarm, AC power, battery, tamper"
+        f"{len(zone_list)} zones, siren, alarm, AC power, battery"
     )
 
 
@@ -550,7 +534,6 @@ class AlarmBridge:
             "alarm_triggered": status.alarm_triggered,
             "ac_power_loss": status.ac_power_loss,
             "battery_low": status.battery_low,
-            "tamper": status.tamper,
             "firmware_version": status.firmware_version,
             "model_name": status.model_name,
             "date_time": status.date_time,
