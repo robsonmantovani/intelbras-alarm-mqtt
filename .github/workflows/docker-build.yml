@@ -58,7 +58,13 @@ jobs:
 
       - name: Check coverage threshold (>=40%)
         run: |
-          coverage report | tail -1 | awk -F'%' '{if ($1+0 < 40) {print "Coverage below 40%!"; exit 1}}'
+          # Extract the coverage percentage from the TOTAL line
+          pct=$(coverage report | grep '^TOTAL' | awk '{print $NF}' | tr -d '%')
+          echo "Total coverage: ${pct}%"
+          if [ "$(echo "$pct < 40" | bc -l)" = "1" ]; then
+            echo "Coverage ${pct}% is below 40% threshold!"
+            exit 1
+          fi
 
   build:
     runs-on: ubuntu-latest
