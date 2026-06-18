@@ -39,11 +39,15 @@ CMD_SMART_STATUS = [0x5D]     # AMT 2018 E Smart (135+ bytes)
 # V1 Action commands
 # IMPORTANT: The ANM 24 NET requires the partition byte after the command!
 # Single-byte commands (just 0x41 or 0x44) return 0xE7 (DEACTIVATION_DENIED).
-# You must include the partition byte: 0x41/0x44 + 0x41 (partition A) or 0x42 (B)
-CMD_ACTIVATE = [0x41, 0x41]        # 'A' + 'A' - arm partition A (total)
-CMD_ACTIVATE_PART_B = [0x41, 0x42]  # 'A' + 'B' - arm partition B
-CMD_ACTIVATE_STAY = [0x41, 0x41, 0x50]  # 'A' + 'A' + 'P' - arm partition A stay
-CMD_ACTIVATE_STAY_B = [0x41, 0x42, 0x50]  # 'A' + 'B' + 'P' - arm partition B stay
+#
+# Mapping for the typical ANM 24 NET setup (2 partitions):
+# - Partition A: full/away arming (all zones active, used when nobody is home)
+# - Partition B: stay/partial arming (interior zones bypassed, used at night)
+#
+# So ARM_AWAY uses partition A and ARM_HOME uses partition B.
+# DISARM must disarm BOTH partitions to fully deactivate.
+CMD_ACTIVATE = [0x41, 0x41]        # 'A' + 'A' - arm partition A (total/away)
+CMD_ACTIVATE_PART_B = [0x41, 0x42]  # 'A' + 'B' - arm partition B (stay/home)
 CMD_DEACTIVATE = [0x44, 0x41]      # 'D' + 'A' - disarm partition A
 CMD_DEACTIVATE_PART_B = [0x44, 0x42]  # 'D' + 'B' - disarm partition B
 CMD_SIREN_OFF = [0x4F]             # 'O' - turn off siren
@@ -220,21 +224,27 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
     # Bit 2     = partition C armed
     # Bit 3     = partition D armed
     # Bit 4     = stay mode (armed_home/armed_stay)
+    # Bit 7     = AC power loss (1 = lost)
     try:
         p = data[22]
         status.partition_a = bool(p & 0x01)
         status.partition_b = bool(p & 0x02)
         status.partition_c = bool(p & 0x04)
         status.partition_d = bool(p & 0x08)
+        status.ac_power_loss = bool(p & 0x80)
+
         status.armed = any([status.partition_a, status.partition_b,
                            status.partition_c, status.partition_d])
         if status.armed:
-            all_armed = all([status.partition_a, status.partition_b,
-                            status.partition_c, status.partition_d])
-            # If any partition is in stay mode, treat as armed_home
-            # Otherwise armed_away (total)
-            is_stay = bool(p & 0x10)
-            status.arm_mode = "armed_home" if is_stay else "armed_away"
+            # Logic for the typical 2-partition ANM 24 NET setup:
+            # - Partition A = full/away (all zones, including perimeter)
+            # - Partition B = stay/home (interior only)
+            # If only B is armed -> home mode (you're inside, perimeter active)
+            # If A is armed (with or without B) -> away mode (nobody home)
+            if status.partition_a:
+                status.arm_mode = "armed_away"
+            else:
+                status.arm_mode = "armed_home"
         else:
             status.arm_mode = "disarmed"
     except IndexError:
@@ -249,12 +259,7 @@ def parse_v1_status(data: list[int], total_zones: int = 24) -> AlarmStatus:
     except IndexError:
         pass
 
-    # AC power from data[22] bit 7 (MSB)
-    # 0 = AC power OK, 1 = AC power lost
-    try:
-        status.ac_power_loss = bool(data[22] & 0x80)
-    except IndexError:
-        pass
+    # AC power already read from data[22] bit 7 in the partition section above
 
     # Output/alarm byte at data[38]
     # For ANM 24 NET / AMT 2018 family:
@@ -419,11 +424,16 @@ class CloudRelayClient:
         return self._parse_action_response(data, "Arm (AWAY)")
 
     def arm_stay(self) -> bool:
-        """Arm the alarm in PARTIAL/STAY mode (interior zones bypassed)."""
-        data = self._send_v1_command(CMD_ACTIVATE_STAY, recv_timeout=5.0)
+        """Arm the alarm in partial/stay mode using partition B.
+
+        On the ANM 24 NET, partition B is typically configured for
+        stay/home arming (interior zones bypassed, perimeter active).
+        This matches the Home Assistant 'arm_home' action.
+        """
+        data = self._send_v1_command(CMD_ACTIVATE_PART_B, recv_timeout=5.0)
         if data is None:
             return False
-        return self._parse_action_response(data, "Arm (STAY)")
+        return self._parse_action_response(data, "Arm (STAY/B)")
 
     def panic(self) -> bool:
         """Trigger a panic alarm (siren + alarm)."""
@@ -467,11 +477,20 @@ class CloudRelayClient:
         return self._parse_action_response(data, action)
 
     def disarm(self) -> bool:
-        """Disarm the alarm."""
-        data = self._send_v1_command(CMD_DEACTIVATE, recv_timeout=5.0)
-        if data is None:
-            return False
-        return self._parse_action_response(data, "Disarm")
+        """Disarm the alarm - both partitions A and B.
+
+        On the ANM 24 NET with 2 partitions, you must send two disarm
+        commands (one per partition) to fully deactivate the alarm.
+        """
+        # Disarm partition A
+        data_a = self._send_v1_command(CMD_DEACTIVATE, recv_timeout=5.0)
+        a_ok = data_a is not None and self._parse_action_response(data_a, "Disarm (A)")
+
+        # Disarm partition B
+        data_b = self._send_v1_command(CMD_DEACTIVATE_PART_B, recv_timeout=5.0)
+        b_ok = data_b is not None and self._parse_action_response(data_b, "Disarm (B)")
+
+        return a_ok or b_ok
 
     def siren_off(self) -> bool:
         """Turn off siren."""
