@@ -465,12 +465,11 @@ class AlarmBridge:
                 f"✅ MQTT connected to {self.mqtt_cfg['host']}:{self.mqtt_cfg['port']}"
             )
             # Subscribe to command topics
-            cmd_topic = f"{self.mqtt_cfg['topic_prefix']}/command/#"
+            # HA button entities (panic, silent_panic, siren_off) and the
+            # command topic (ARM/DISARM) all live under topic_prefix
+            cmd_topic = f"{self.mqtt_cfg['topic_prefix']}/#"
             client.subscribe(cmd_topic)
             mqtt_logger.info(f"Subscribed to {cmd_topic}")
-            siren_topic = f"{self.mqtt_cfg['topic_prefix']}/siren/control"
-            client.subscribe(siren_topic)
-            mqtt_logger.info(f"Subscribed to {siren_topic}")
             # Mark online
             self._mqtt_publish_availability("online")
             # Publish HA discovery payloads so HA auto-creates entities
