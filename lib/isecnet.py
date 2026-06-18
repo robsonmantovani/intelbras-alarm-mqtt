@@ -50,8 +50,25 @@ CMD_ACTIVATE = [0x41, 0x41]        # 'A' + 'A' - arm partition A (total/away)
 CMD_ACTIVATE_PART_B = [0x41, 0x42]  # 'A' + 'B' - arm partition B (stay/home)
 CMD_DEACTIVATE = [0x44, 0x41]      # 'D' + 'A' - disarm partition A
 CMD_DEACTIVATE_PART_B = [0x44, 0x42]  # 'D' + 'B' - disarm partition B
-CMD_SIREN_OFF = [0x4F]             # 'O' - turn off siren
-CMD_PANIC = [0x45]                 # 'E' - panic alarm (triggers siren)
+
+# Panic commands (per APK source):
+#   0 = Silent panic (no siren, sends monitoring alert)
+#   1 = Audible panic (activates siren)  <-- this is the "Emergency" button
+#   2 = Fire panic (AMT 8000 only)
+#   3 = Medical emergency (AMT 8000 only)
+# V1 syntax: [0x45, type]
+CMD_PANIC_SILENT = [0x45, 0]       # silent panic
+CMD_PANIC_AUDIBLE = [0x45, 1]      # audible panic (triggers siren) - "Emergency"
+CMD_PANIC_FIRE = [0x45, 2]         # fire panic (AMT 8000 only)
+CMD_PANIC_MEDICAL = [0x45, 3]      # medical emergency (AMT 8000 only)
+
+# For the bridge, we use audible panic (this is the "Emergency" button
+# the user knows from the AMT Mobile V3 app)
+CMD_PANIC = CMD_PANIC_AUDIBLE
+
+# NOTE: The ANM 24 NET V1 protocol does NOT expose a siren-off command.
+# 0x4F returns 0xE2 INVALID_COMMAND on this panel. To stop the siren,
+# use DISARM (the app uses the same approach).
 CMD_BYPASS = 0x42                  # 'B' - bypass zones (followed by bitmask)
 
 # Model names
@@ -511,11 +528,13 @@ class CloudRelayClient:
         return a_ok or b_ok
 
     def siren_off(self) -> bool:
-        """Turn off siren."""
-        data = self._send_v1_command(CMD_SIREN_OFF, recv_timeout=5.0)
-        if data is None:
-            return False
-        return self._parse_action_response(data, "Siren off")
+        """Turn off siren - NOT supported on ANM 24 NET V1 protocol.
+
+        The 0x4F command returns 0xE2 INVALID_COMMAND on this panel.
+        To stop the siren, use disarm() (the AMT Mobile app does the
+        same thing).
+        """
+        return False  # not supported
 
     def _parse_action_response(self, data: list[int], action: str) -> bool:
         """Parse the response of an action command (arm/disarm/panic/siren).
