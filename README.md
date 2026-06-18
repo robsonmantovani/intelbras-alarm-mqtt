@@ -209,6 +209,39 @@ Bridge connects to amt.intelbras.com.br:9015 →
 - `sensor.ac_power`: AC power status detection loss
 - `sensor.battery_low`: Low battery warning
 
+## Development
+
+### Running tests locally
+
+The project includes a suite of unit tests that run without any hardware or
+network access. They cover the V1 protocol parser, the action response
+codes, the YAML config loader, the MQTT dispatcher, and the status
+serialization.
+
+```bash
+# From project root
+python3 -m unittest discover tests -v
+```
+
+Expected output: `Ran 46 tests in 0.03s — OK`
+
+Tests are also run automatically in CI by the
+[`.github/workflows/docker-build.yml`](.github/workflows/docker-build.yml)
+`test` job on every push and pull request.
+
+### Adding tests
+
+Tests live in `tests/` and follow the standard `unittest` framework
+conventions. Two files are present today:
+
+- `tests/test_isecnet_parser.py` — Protocol parsing (checksum, framing,
+  status response, zone bitmaps, action codes)
+- `tests/test_app.py` — Config loading, status serialization, MQTT
+  command dispatch
+
+When adding a new feature or fixing a bug, please include a test that
+covers the new behavior.
+
 ## Testing Your Connection
 
 Before deployment use:

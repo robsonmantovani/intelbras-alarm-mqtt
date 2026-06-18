@@ -53,12 +53,12 @@ def load_config(path: str) -> dict:
     if os.path.exists(path):
         with open(path, "r") as f:
             user_config = yaml.safe_load(f) or {}
-        config["alarm"].update(user_config.get("alarm", {}))
-        config["mqtt"].update(user_config.get("mqtt", {}))
+        config["alarm"].update(user_config.get("alarm") or {})
+        config["mqtt"].update(user_config.get("mqtt") or {})
 
         # Normalize zone keys to strings (YAML parses "6:" as int, but we
         # need string keys for the rest of the code to work)
-        user_zones = user_config.get("zones", {}) or {}
+        user_zones = user_config.get("zones") or {}
         normalized_zones = {str(k): v for k, v in user_zones.items()}
         config["zones"].update(normalized_zones)
     else:

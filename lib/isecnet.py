@@ -537,62 +537,66 @@ class CloudRelayClient:
         return False  # not supported
 
     def _parse_action_response(self, data: list[int], action: str) -> bool:
-        """Parse the response of an action command (arm/disarm/panic/siren).
-
-        Response codes (from APK ISECNetResponse enum):
-            0x00 = SUCCESS (in status response, byte[2])
-            0xFE = SUCCESS (in short action response)
-            0xE0 = INVALID_PACKAGE
-            0xE1 = INCORRECT_PASSWORD
-            0xE2 = INVALID_COMMAND
-            0xE3 = NO_PARTITIONS
-            0xE4 = OPEN_ZONES
-            0xE5 = COMMAND_DEPRECATED
-            0xE6 = BYPASS_DENIED
-            0xE7 = DEACTIVATION_DENIED / command-queued (treat as soft success)
-            0xE8 = BYPASS_CENTRAL_ACTIVATED
-            0xFF = INVALID_MODEL
-
-        IMPORTANT: The ANM 24 NET panel returns 0xE7 for arm/disarm followed
-        by a status response (46 bytes). Per APK source:
-        "No response to ARM is common - panel may be processing exit delay.
-         This is NOT necessarily a failure - we'll verify with status check."
-
-        So we treat 0xE7 as a soft success and let the next status poll
-        confirm whether the action actually took effect.
-        """
+        """Parse the response of an action command (arm/disarm/panic/siren)."""
         if len(data) < 2:
             logger.warning(f"{action}: short response ({len(data)} bytes): {bytes(data).hex()}")
             return False
+        return parse_action_code(data[1], action)
 
-        code = data[1]
-        code_names = {
-            0x00: "SUCCESS",
-            0xFE: "SUCCESS",
-            0xE0: "INVALID_PACKAGE",
-            0xE1: "INCORRECT_PASSWORD",
-            0xE2: "INVALID_COMMAND",
-            0xE3: "NO_PARTITIONS",
-            0xE4: "OPEN_ZONES",
-            0xE5: "COMMAND_DEPRECATED",
-            0xE6: "BYPASS_DENIED",
-            0xE7: "COMMAND_QUEUED",
-            0xE8: "BYPASS_CENTRAL_ACTIVATED",
-            0xFF: "INVALID_MODEL",
-        }
-        code_name = code_names.get(code, f"UNKNOWN(0x{code:02X})")
 
-        if code in (0x00, 0xFE, 0xE7):
-            # 0xE7 (DEACTIVATION_DENIED) is treated as a soft success
-            # because the ANM 24 NET panel can return this when the
-            # action actually works but the panel is processing other
-            # commands. The next status poll will confirm.
-            label = "OK" if code in (0x00, 0xFE) else "queued"
-            logger.info(f"{action}: {label} (code 0x{code:02X})")
-            return True
-        else:
-            logger.warning(f"{action}: FAILED — {code_name} (code 0x{code:02X})")
-            return False
+def parse_action_code(code: int, action: str = "Action") -> bool:
+    """Parse an action response code from the ANM 24 NET panel.
+
+    Response codes (from APK ISECNetResponse enum):
+        0x00 = SUCCESS (in status response, byte[2])
+        0xFE = SUCCESS (in short action response)
+        0xE0 = INVALID_PACKAGE
+        0xE1 = INCORRECT_PASSWORD
+        0xE2 = INVALID_COMMAND
+        0xE3 = NO_PARTITIONS
+        0xE4 = OPEN_ZONES
+        0xE5 = COMMAND_DEPRECATED
+        0xE6 = BYPASS_DENIED
+        0xE7 = DEACTIVATION_DENIED / command-queued (treat as soft success)
+        0xE8 = BYPASS_CENTRAL_ACTIVATED
+        0xFF = INVALID_MODEL
+
+    IMPORTANT: The ANM 24 NET panel returns 0xE7 for arm/disarm followed
+    by a status response (46 bytes). Per APK source:
+    "No response to ARM is common - panel may be processing exit delay.
+     This is NOT necessarily a failure - we'll verify with status check."
+
+    So we treat 0xE7 as a soft success and let the next status poll
+    confirm whether the action actually took effect.
+    """
+    code_names = {
+        0x00: "SUCCESS",
+        0xFE: "SUCCESS",
+        0xE0: "INVALID_PACKAGE",
+        0xE1: "INCORRECT_PASSWORD",
+        0xE2: "INVALID_COMMAND",
+        0xE3: "NO_PARTITIONS",
+        0xE4: "OPEN_ZONES",
+        0xE5: "COMMAND_DEPRECATED",
+        0xE6: "BYPASS_DENIED",
+        0xE7: "DEACTIVATION_DENIED",
+        0xE8: "BYPASS_CENTRAL_ACTIVATED",
+        0xFF: "INVALID_MODEL",
+    }
+    if code in (0x00, 0xFE):
+        logger.info(f"{action}: OK (code 0x{code:02X})")
+        return True
+    elif code == 0xE7:
+        # ANM 24 NET quirk: arm/disarm return 0xE7 then send status.
+        # Treat as soft success - the next status poll will confirm.
+        logger.info(
+            f"{action}: command queued (0xE7), checking status to confirm"
+        )
+        return True
+    else:
+        name = code_names.get(code, f"UNKNOWN(0x{code:02X})")
+        logger.warning(f"{action}: FAILED — {name} (code 0x{code:02X})")
+        return False
 
     @property
     def is_connected(self) -> bool:
