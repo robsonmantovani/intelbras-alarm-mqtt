@@ -136,34 +136,11 @@ def publish_discovery(client: mqtt.Client, config: dict):
     )
     mqtt_logger.info(f"Published HA discovery: alarm_control_panel (ARM_AWAY, ARM_HOME, DISARM)")
 
-    # --- Panic button (audible) ---
-    client.publish(
-        _discovery_topic(prefix, "button", f"{device_id}_panic"),
-        json.dumps({
-            "name": "Pânico Audível",
-            "unique_id": f"{device_id}_panic",
-            "device": device,
-            "command_topic": f"{topic_base}/panic",
-            "payload_press": "PRESS",
-            "availability_topic": f"{topic_base}/availability",
-            "payload_available": "online", "payload_not_available": "offline",
-        }), retain=True,
-    )
-
-    # --- Siren off button (turn off the siren) ---
-    client.publish(
-        _discovery_topic(prefix, "button", f"{device_id}_siren_off"),
-        json.dumps({
-            "name": "Desligar Sirene",
-            "unique_id": f"{device_id}_siren_off",
-            "device": device,
-            "command_topic": f"{topic_base}/siren_off",
-            "payload_press": "PRESS",
-            "availability_topic": f"{topic_base}/availability",
-            "payload_available": "online", "payload_not_available": "offline",
-        }), retain=True,
-    )
-    mqtt_logger.info(f"Published HA discovery: 2 buttons (panic, siren_off)")
+    # NOTE: Panic and Siren Off are NOT exposed by the ANM 24 NET V1 Cloud
+    # Relay protocol. The single-byte commands 0x45 (panic) and 0x4F
+    # (siren off) are either ignored or rejected by this panel. The
+    # Intelbras AMT Mobile V3 app uses a proprietary channel for these
+    # features that we cannot replicate.
 
     # --- Zone binary_sensors ---
     if zones_cfg:
@@ -504,20 +481,27 @@ class AlarmBridge:
         # Siren control
         elif topic == f"{base}/siren/control":
             if payload_upper == "OFF":
-                self.siren_off()
+                mqtt_logger.warning(
+                    "Siren OFF not supported by ANM 24 NET V1 protocol. "
+                    "The 0x4F command returns INVALID_COMMAND on this panel."
+                )
             else:
                 mqtt_logger.warning(
                     f"Siren ON not directly supported by ANM 24 NET. "
-                    f"Use PANIC command or app."
+                    f"Use the app's panic feature."
                 )
-        # Panic button (HA button entity)
+        # Legacy panic/siren_off topics (kept for backward compat but
+        # these commands don't work on the ANM 24 NET V1 protocol)
         elif topic == f"{base}/panic":
-            cloud_logger.info("Panic button pressed - sending PANIC command")
-            self.panic()
-        # Siren off button
+            mqtt_logger.warning(
+                "PANIC not supported by ANM 24 NET V1 protocol. "
+                "The 0x45 command is ignored by this panel."
+            )
         elif topic == f"{base}/siren_off":
-            cloud_logger.info("Siren off button pressed - turning off siren")
-            self.siren_off()
+            mqtt_logger.warning(
+                "SIREN OFF not supported by ANM 24 NET V1 protocol. "
+                "The 0x4F command returns INVALID_COMMAND on this panel."
+            )
         else:
             mqtt_logger.debug(f"Unhandled topic: {topic}")
 
