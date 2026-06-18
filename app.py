@@ -154,6 +154,129 @@ def publish_discovery(client: mqtt.Client, config: dict):
     )
     mqtt_logger.info(f"Published HA discovery: 1 button (emergency)")
 
+    # --- Diagnostic sensors (firmware, model, datetime, etc) ---
+    # These expose the metadata fields from the panel status payload
+    # as individual HA entities, so you can monitor them easily and
+    # build automations (e.g. "alert if battery_low").
+
+    # Model name (sensor.text)
+    client.publish(
+        _discovery_topic(prefix, "sensor", f"{device_id}_model"),
+        json.dumps({
+            "name": "Modelo",
+            "unique_id": f"{device_id}_model",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ value_json.model_name }}",
+            "icon": "mdi:chip",
+        }), retain=True,
+    )
+
+    # Firmware version (sensor.text)
+    client.publish(
+        _discovery_topic(prefix, "sensor", f"{device_id}_firmware"),
+        json.dumps({
+            "name": "Firmware",
+            "unique_id": f"{device_id}_firmware",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ value_json.firmware_version }}",
+            "icon": "mdi:package-variant",
+        }), retain=True,
+    )
+
+    # Panel date/time (sensor.text) - shows the alarme's internal clock
+    # (useful to detect if the panel's clock is wrong, e.g. "24/06/2038")
+    client.publish(
+        _discovery_topic(prefix, "sensor", f"{device_id}_datetime"),
+        json.dumps({
+            "name": "Data/Hora do Alarme",
+            "unique_id": f"{device_id}_datetime",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ value_json.date_time }}",
+            "icon": "mdi:clock-outline",
+        }), retain=True,
+    )
+
+    # Last update from bridge (sensor.text) - shows when we last heard
+    # from the panel
+    client.publish(
+        _discovery_topic(prefix, "sensor", f"{device_id}_last_update"),
+        json.dumps({
+            "name": "Última Atualização",
+            "unique_id": f"{device_id}_last_update",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ value_json.last_update }}",
+            "device_class": "timestamp",
+            "icon": "mdi:update",
+        }), retain=True,
+    )
+
+    # Connection status (binary_sensor) - True if bridge is connected
+    # to the panel via Cloud Relay
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_connected"),
+        json.dumps({
+            "name": "Conectado ao Painel",
+            "unique_id": f"{device_id}_connected",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'ON' if value_json.connected else 'OFF' }}",
+            "device_class": "connectivity",
+            "payload_on": "ON", "payload_off": "OFF",
+        }), retain=True,
+    )
+
+    # Total zones (sensor.number) - exposes the total_zones config
+    client.publish(
+        _discovery_topic(prefix, "sensor", f"{device_id}_total_zones"),
+        json.dumps({
+            "name": "Total de Zonas",
+            "unique_id": f"{device_id}_total_zones",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ value_json.total_zones }}",
+            "icon": "mdi:counter",
+            "state_class": "measurement",
+        }), retain=True,
+    )
+
+    # Open zones count (sensor.number) - useful for automations
+    client.publish(
+        _discovery_topic(prefix, "sensor", f"{device_id}_open_zones_count"),
+        json.dumps({
+            "name": "Zonas Abertas",
+            "unique_id": f"{device_id}_open_zones_count",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ value_json.zones_open | length }}",
+            "icon": "mdi:door-open",
+            "state_class": "measurement",
+        }), retain=True,
+    )
+
+    # Is partitioned (binary_sensor) - True if panel has partitions
+    client.publish(
+        _discovery_topic(prefix, "binary_sensor", f"{device_id}_partitioned"),
+        json.dumps({
+            "name": "Painel Particionado",
+            "unique_id": f"{device_id}_partitioned",
+            "device": device,
+            "state_topic": f"{topic_base}/status",
+            "value_template": "{{ 'ON' if value_json.is_partitioned else 'OFF' }}",
+            "icon": "mdi:call-split",
+            "payload_on": "ON", "payload_off": "OFF",
+        }), retain=True,
+    )
+
+    mqtt_logger.info(
+        "Published HA discovery: 7 diagnostic sensors "
+        "(model, firmware, datetime, last_update, connected, "
+        "total_zones, open_zones_count, partitioned)"
+    )
+
     # --- Zone binary_sensors ---
     if zones_cfg:
         # Only publish zones listed in config
