@@ -211,6 +211,13 @@ Bridge connects to amt.intelbras.com.br:9015 →
 
 ## Development
 
+### For AI coding agents
+
+If you're an AI assistant (Hermes, Claude Code, Codex, Copilot, etc.) helping
+contribute to this project, read [`AGENTS.md`](AGENTS.md) first. It contains
+project conventions, common pitfalls, and a checklist for PRs that will save
+you (and the maintainer) time.
+
 ### Running tests locally
 
 The project includes a suite of unit tests that run without any hardware or
